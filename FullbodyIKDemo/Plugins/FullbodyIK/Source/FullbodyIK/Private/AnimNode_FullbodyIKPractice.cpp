@@ -6,6 +6,198 @@
 #include "AnimInstanceInterface_FullbodyIK.h"
 #include "DrawDebugHelpers.h"
 
+namespace {
+FORCEINLINE float SinDegree(float Degree) { return FMath::Sin(FMath::DegreesToRadians(Degree)); }
+FORCEINLINE float CosDegree(float Degree) { return FMath::Cos(FMath::DegreesToRadians(Degree)); }
+
+FORCEINLINE FMatrix RotX(float Roll)
+{
+	return FMatrix(
+		FPlane(1, 0, 0, 0),
+		FPlane(0, CosDegree(Roll), -SinDegree(Roll), 0),
+		FPlane(0, SinDegree(Roll), CosDegree(Roll), 0),
+		FPlane(0, 0, 0, 1)
+	);
+}
+
+FORCEINLINE FMatrix RotY(float Pitch)
+{
+	return FMatrix(
+		FPlane(CosDegree(Pitch), 0, SinDegree(Pitch), 0),
+		FPlane(0, 1, 0, 0),
+		FPlane(-SinDegree(Pitch), 0, CosDegree(Pitch), 0),
+		FPlane(0, 0, 0, 1)
+	);
+}
+
+FORCEINLINE FMatrix RotZ(float Yaw)
+{
+	return FMatrix(
+		FPlane(CosDegree(Yaw), SinDegree(Yaw), 0, 0),
+		FPlane(-SinDegree(Yaw), CosDegree(Yaw), 0, 0),
+		FPlane(0, 0, 1, 0),
+		FPlane(0, 0, 0, 1)
+	);
+}
+
+FORCEINLINE FMatrix DiffX(float Roll)
+{
+	return FMatrix(
+		FPlane(0, 0, 0, 0),
+		FPlane(0, -SinDegree(Roll), -CosDegree(Roll), 0),
+		FPlane(0, CosDegree(Roll), -SinDegree(Roll), 0),
+		FPlane(0, 0, 0, 0)
+	);
+}
+
+FORCEINLINE FMatrix DiffY(float Pitch)
+{
+	return FMatrix(
+		FPlane(-SinDegree(Pitch), 0, CosDegree(Pitch), 0),
+		FPlane(0, 0, 0, 0),
+		FPlane(-CosDegree(Pitch), 0, -SinDegree(Pitch), 0),
+		FPlane(0, 0, 0, 0)
+	);
+}
+
+FORCEINLINE FMatrix DiffZ(float Yaw)
+{
+	return FMatrix(
+		FPlane(-SinDegree(Yaw), CosDegree(Yaw), 0, 0),
+		FPlane(-CosDegree(Yaw), -SinDegree(Yaw), 0, 0),
+		FPlane(0, 0, 0, 0),
+		FPlane(0, 0, 0, 0)
+	);
+}
+
+FORCEINLINE float MatrixInverse3(float* DstMatrix, const float* SrcMatrix)
+{
+	float Det =
+		  SrcMatrix[0 * 3 + 0] * SrcMatrix[1 * 3 + 1] * SrcMatrix[2 * 3 + 2]
+		+ SrcMatrix[1 * 3 + 0] * SrcMatrix[2 * 3 + 1] * SrcMatrix[0 * 3 + 2]
+		+ SrcMatrix[2 * 3 + 0] * SrcMatrix[0 * 3 + 1] * SrcMatrix[1 * 3 + 2]
+		- SrcMatrix[0 * 3 + 0] * SrcMatrix[2 * 3 + 1] * SrcMatrix[1 * 3 + 2]
+		- SrcMatrix[2 * 3 + 0] * SrcMatrix[1 * 3 + 1] * SrcMatrix[0 * 3 + 2]
+		- SrcMatrix[1 * 3 + 0] * SrcMatrix[0 * 3 + 1] * SrcMatrix[2 * 3 + 2];
+
+	if (Det == 0)
+	{
+		return Det;
+	}
+
+	DstMatrix[0 * 3 + 0] = (SrcMatrix[1 * 3 + 1] * SrcMatrix[2 * 3 + 2] - SrcMatrix[1 * 3 + 2] * SrcMatrix[2 * 3 + 1]) / Det;
+	DstMatrix[0 * 3 + 1] = (SrcMatrix[0 * 3 + 2] * SrcMatrix[2 * 3 + 1] - SrcMatrix[0 * 3 + 1] * SrcMatrix[2 * 3 + 2]) / Det;
+	DstMatrix[0 * 3 + 2] = (SrcMatrix[0 * 3 + 1] * SrcMatrix[1 * 3 + 2] - SrcMatrix[0 * 3 + 2] * SrcMatrix[1 * 3 + 1]) / Det;
+
+	DstMatrix[1 * 3 + 0] = (SrcMatrix[1 * 3 + 2] * SrcMatrix[2 * 3 + 0] - SrcMatrix[1 * 3 + 0] * SrcMatrix[2 * 3 + 2]) / Det;
+	DstMatrix[1 * 3 + 1] = (SrcMatrix[0 * 3 + 0] * SrcMatrix[2 * 3 + 2] - SrcMatrix[0 * 3 + 2] * SrcMatrix[2 * 3 + 0]) / Det;
+	DstMatrix[1 * 3 + 2] = (SrcMatrix[0 * 3 + 2] * SrcMatrix[1 * 3 + 0] - SrcMatrix[0 * 3 + 0] * SrcMatrix[1 * 3 + 2]) / Det;
+
+	DstMatrix[2 * 3 + 0] = (SrcMatrix[1 * 3 + 0] * SrcMatrix[2 * 3 + 1] - SrcMatrix[1 * 3 + 1] * SrcMatrix[2 * 3 + 0]) / Det;
+	DstMatrix[2 * 3 + 1] = (SrcMatrix[0 * 3 + 1] * SrcMatrix[2 * 3 + 0] - SrcMatrix[0 * 3 + 0] * SrcMatrix[2 * 3 + 1]) / Det;
+	DstMatrix[2 * 3 + 2] = (SrcMatrix[0 * 3 + 0] * SrcMatrix[1 * 3 + 1] - SrcMatrix[0 * 3 + 1] * SrcMatrix[1 * 3 + 0]) / Det;
+
+	return Det;
+}
+
+FORCEINLINE float MatrixInverse4(float* DstMatrix, const float* SrcMatrix)
+{
+	float Det =
+			SrcMatrix[0 * 4 + 0] * (
+				SrcMatrix[1 * 4 + 1] * (SrcMatrix[2 * 4 + 2] * SrcMatrix[3 * 4 + 3] - SrcMatrix[2 * 4 + 3] * SrcMatrix[3 * 4 + 2]) -
+				SrcMatrix[2 * 4 + 1] * (SrcMatrix[1 * 4 + 2] * SrcMatrix[3 * 4 + 3] - SrcMatrix[1 * 4 + 3] * SrcMatrix[3 * 4 + 2]) +
+				SrcMatrix[3 * 4 + 1] * (SrcMatrix[1 * 4 + 2] * SrcMatrix[2 * 4 + 3] - SrcMatrix[1 * 4 + 3] * SrcMatrix[2 * 4 + 2])
+				) -
+			SrcMatrix[1 * 4 + 0] * (
+				SrcMatrix[0 * 4 + 1] * (SrcMatrix[2 * 4 + 2] * SrcMatrix[3 * 4 + 3] - SrcMatrix[2 * 4 + 3] * SrcMatrix[3 * 4 + 2]) -
+				SrcMatrix[2 * 4 + 1] * (SrcMatrix[0 * 4 + 2] * SrcMatrix[3 * 4 + 3] - SrcMatrix[0 * 4 + 3] * SrcMatrix[3 * 4 + 2]) +
+				SrcMatrix[3 * 4 + 1] * (SrcMatrix[0 * 4 + 2] * SrcMatrix[2 * 4 + 3] - SrcMatrix[0 * 4 + 3] * SrcMatrix[2 * 4 + 2])
+				) +
+			SrcMatrix[2 * 4 + 0] * (
+				SrcMatrix[0 * 4 + 1] * (SrcMatrix[1 * 4 + 2] * SrcMatrix[3 * 4 + 3] - SrcMatrix[1 * 4 + 3] * SrcMatrix[3 * 4 + 2]) -
+				SrcMatrix[1 * 4 + 1] * (SrcMatrix[0 * 4 + 2] * SrcMatrix[3 * 4 + 3] - SrcMatrix[0 * 4 + 3] * SrcMatrix[3 * 4 + 2]) +
+				SrcMatrix[3 * 4 + 1] * (SrcMatrix[0 * 4 + 2] * SrcMatrix[1 * 4 + 3] - SrcMatrix[0 * 4 + 3] * SrcMatrix[1 * 4 + 2])
+				) -
+			SrcMatrix[3 * 4 + 0] * (
+				SrcMatrix[0 * 4 + 1] * (SrcMatrix[1 * 4 + 2] * SrcMatrix[2 * 4 + 3] - SrcMatrix[1 * 4 + 3] * SrcMatrix[2 * 4 + 2]) -
+				SrcMatrix[1 * 4 + 1] * (SrcMatrix[0 * 4 + 2] * SrcMatrix[2 * 4 + 3] - SrcMatrix[0 * 4 + 3] * SrcMatrix[2 * 4 + 2]) +
+				SrcMatrix[2 * 4 + 1] * (SrcMatrix[0 * 4 + 2] * SrcMatrix[1 * 4 + 3] - SrcMatrix[0 * 4 + 3] * SrcMatrix[1 * 4 + 2])
+				);
+
+	if (Det == 0)
+	{
+		return Det;
+	}
+
+	VectorMatrixInverse(DstMatrix, SrcMatrix);
+
+	return Det;
+}
+
+FORCEINLINE void MatrixTranspose(float* DstMatrix, const float* SrcMatrix, const int32 Row, const int32 Col)
+{
+	for (int32 i = 0; i < Row; ++i)
+	{
+		for (int32 j = 0; j < Col; ++j)
+		{
+			DstMatrix[j * Row + i] = SrcMatrix[i * Col + j];
+		}
+	}
+}
+
+FORCEINLINE void MatrixMultiply(float* DstMatrix, const float* SrcMatrix1, const int32 Row1, const int32 Col1, const float* SrcMatrix2, const int32 Row2, const int32 Col2)
+{
+	check(Col1 == Row2);
+
+	for (int32 i = 0; i < Row1; ++i)
+	{
+		for (int32 j = 0; j < Col2; ++j)
+		{
+			float& Elem = DstMatrix[i * Col2 + j];
+			Elem = 0;
+
+			for (int32 k = 0; k < Col1; ++k)
+			{
+				Elem += SrcMatrix1[i * Col1 + k] * SrcMatrix2[k * Col2 + j];
+			}
+		}
+	}
+}
+
+FORCEINLINE float MatrixDet(const float* SrcMatrix, const int32 N)
+{
+	float Det = 0;
+
+	for (int32 i = 0; i < N; ++i)
+	{
+		float AddValue = 1;
+		float SubValue = 1;
+
+		for (int32 j = 0; j < N; ++j)
+		{
+			AddValue *= SrcMatrix[j * N + ((i + j) % N)];
+			SubValue *= SrcMatrix[j * N + ((i + (N - j - 1)) % N)];
+		}
+
+		Det += AddValue;
+		Det -= SubValue;
+	}
+
+	return Det;
+}
+
+FORCEINLINE float GetMappedRangeEaseInClamped(
+	const float& InRangeMin,
+	const float& InRangeMax,
+	const float& OutRangeMin,
+	const float& OutRangeMax,
+	const float& Exp,
+	const float& Value)
+{
+	float Pct = FMath::Clamp((Value - InRangeMin) / (InRangeMax - InRangeMin), 0.f, 1.f);
+	return FMath::InterpEaseIn(OutRangeMin, OutRangeMax, Pct, Exp);
+}
+} // namespace
 
 FAnimNode_FullbodyIKPractice::FAnimNode_FullbodyIKPractice()
 	: Setting(nullptr)
