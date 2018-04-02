@@ -35,6 +35,58 @@ struct FULLBODYIK_API FAnimNode_FullbodyIKPractice : public FAnimNode_SkeletalCo
 	// End of FAnimNode_SkeletalControlBase interface
 
 private:
+	struct FBuffer
+	{
+	public:
+		FBuffer()
+			: Elements(nullptr)
+			, SizeX(0)
+			, SizeY(0)
+		{
+		}
+
+		FBuffer(float* InElements, int32 InSizeX)
+			: Elements(InElements)
+			, SizeX(InSizeX)
+			, SizeY(1)
+		{
+			Elements = new (InElements) float(sizeof(float) * SizeX * SizeY);
+		}
+
+		FBuffer(float* InElements, int32 InSizeY, int32 InSizeX)
+			: Elements(InElements)
+			, SizeX(InSizeX)
+			, SizeY(InSizeY)
+		{
+			Elements = new (InElements) float(sizeof(float) * SizeX * SizeY);
+		}
+
+		void Reset()
+		{
+			FMemory::Memzero(Elements, sizeof(float) * SizeX * SizeY);
+		}
+
+		float& Ref(int32 X)
+		{
+			return Elements[X];
+		}
+
+		float& Ref(int32 Y, int32 X)
+		{
+			return Elements[Y * SizeX + X];
+		}
+
+		float* Ptr()
+		{
+			return Elements;
+		}
+
+	private:
+		float* Elements;
+		int32 SizeX;
+		int32 SizeY;
+	};
+
 	struct FSolverInternal
 	{
 	public:
