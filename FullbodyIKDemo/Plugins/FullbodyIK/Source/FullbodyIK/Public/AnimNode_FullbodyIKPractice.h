@@ -9,6 +9,62 @@
 #include "FullbodyIKSetting.h"
 #include "AnimNode_FullbodyIKPractice.generated.h"
 
+UENUM(BlueprintType)
+enum class EFullbodyIkEffectorTypePractice : uint8
+{
+	KeepLocation,
+	KeepRotation,
+	KeepLocationAndRotation,
+	FollowOriginalLocation,
+	FollowOriginalRotation,
+	FollowOriginalLocationAndRotation,
+};
+
+USTRUCT(BlueprintType)
+struct FULLBODYIK_API FAnimNode_FullbodyIkEffectorPractice
+{
+	GENERATED_BODY()
+
+public:
+	FAnimNode_FullbodyIkEffectorPractice()
+		: EffectorType(EFullbodyIkEffectorTypePractice::KeepLocation)
+		, EffectorBoneName(NAME_None)
+		, RootBoneName(NAME_None)
+		, Location(FVector::ZeroVector)
+		, Rotation(FRotator::ZeroRotator)
+	{
+	}
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=EndEffector)
+	EFullbodyIkEffectorTypePractice EffectorType;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=EndEffector)
+	FName EffectorBoneName;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=EndEffector)
+	FName RootBoneName;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=EndEffector)
+	FVector Location;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=EndEffector)
+	FRotator Rotation;
+};
+
+USTRUCT(BlueprintType)
+struct FULLBODYIK_API FAnimNode_FullbodyIkEffectorsPractice
+{
+	GENERATED_BODY()
+
+public:
+	FAnimNode_FullbodyIkEffectorsPractice()
+	{
+	}
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=EndEffector)
+	TArray<FAnimNode_FullbodyIkEffectorPractice> Effectors;
+};
+
 USTRUCT(BlueprintInternalUseOnly)
 struct FULLBODYIK_API FAnimNode_FullbodyIKPractice : public FAnimNode_SkeletalControlBase
 {
@@ -22,6 +78,9 @@ struct FULLBODYIK_API FAnimNode_FullbodyIKPractice : public FAnimNode_SkeletalCo
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category=IK)
 	int32 EffectorCountMax;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=EndEffector, meta=(PinShownByDefault))
+	FAnimNode_FullbodyIkEffectorsPractice Effectors;
 
 	FAnimNode_FullbodyIKPractice();
 
@@ -108,6 +167,29 @@ private:
 		FFullbodyIKSolverAxis Z;
 	};
 
+	struct FEffectorInternal
+	{
+	public:
+		FEffectorInternal()
+			: EffectorType(EFullbodyIkEffectorTypePractice::KeepLocation)
+			, EffectorBoneIndex(INDEX_NONE)
+			, RootBoneIndex(INDEX_NONE)
+			, ParentBoneIndex(INDEX_NONE)
+			, Location(FVector::ZeroVector)
+			, Rotation(FRotator::ZeroRotator)
+		{
+		}
+
+		EFullbodyIkEffectorTypePractice EffectorType;
+		int32 EffectorBoneIndex;
+		int32 RootBoneIndex;
+		int32 ParentBoneIndex;
+		FVector Location;
+		FRotator Rotation;
+	};
+
+	FFullbodyIKSolver GetSolver(FName BoneName) const;
+
 	static const int32 AXIS_COUNT = 3;
 
 	TArray<int32> BoneIndices;
@@ -117,7 +199,8 @@ private:
 	TMap<int32, FSolverInternal> SolverInternals;
 	TMap<int32, TArray<int32>> SolverTree;
 
-	FFullbodyIKSolver GetSolver(FName BoneName) const;
+	UObject* CachedAnimInstanceObject;
+	FTransform CachedComponentTransform;
 
 	TArray<float> ElementsJ;
 	TArray<float> ElementsJt;

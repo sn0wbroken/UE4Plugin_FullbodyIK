@@ -304,11 +304,95 @@ void FAnimNode_FullbodyIKPractice::Initialize_AnyThread(const FAnimationInitiali
 #endif
 }
 
-void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentSpacePoseContext& Output, TArray<FBoneTransform>& OutBoneTransforms)
+void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentSpacePoseContext& Context, TArray<FBoneTransform>& OutBoneTransforms)
 {
 	check(OutBoneTransforms.Num() == 0);
 
 	if (!Setting)
+	{
+		return;
+	}
+
+	UObject* AnimInstanceObject = Context.AnimInstanceProxy->GetAnimInstanceObject();
+	// TODO:UAnimInstanceInterface_FullbodyIKについては後で調べて写経しよう　UInterfaceの動きは独特だ
+	if (!AnimInstanceObject->GetClass()->ImplementsInterface(UAnimInstanceInterface_FullbodyIK::StaticClass()))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FAnimNode_FullbodyIK implements UAnimInstanceInterface_FullbodyIK."));
+		return;
+	}
+
+	USkeletalMeshComponent* Mesh = Context.AnimInstanceProxy->GetSkelMeshComponent();
+	if (Mesh == nullptr)
+	{
+		return;
+	}
+
+	if (Effectors.Effectors.Num() <= 0)
+	{
+		return;
+	}
+
+	CachedAnimInstanceObject = AnimInstanceObject;
+	CachedComponentTransform = Context.AnimInstanceProxy->GetComponentTransform();
+
+	// エフェクタ
+	// BPから渡されたデータをFEffectorInternalに移し替える
+	TArray<FEffectorInternal> EffectorInternals;
+	for (const FAnimNode_FullbodyIkEffectorPractice& Effector : Effectors.Effectors)
+	{
+		if (Effector.EffectorBoneName == NAME_None || Effector.RootBoneName == NAME_None)
+		{
+			continue;
+		}
+
+		FEffectorInternal EffectorInternal;
+		EffectorInternal.EffectorType = Effector.EffectorType;
+		EffectorInternal.EffectorBoneIndex = Mesh->GetBoneIndex(Effector.EffectorBoneName);
+		EffectorInternal.RootBoneIndex = Mesh->GetBoneIndex(Effector.RootBoneName);
+
+		if (EffectorInternal.EffectorBoneIndex == INDEX_NONE || EffectorInternal.RootBoneIndex == INDEX_NONE)
+		{
+			continue;
+		}
+		
+		int32 BoneIndex = EffectorInternal.EffectorBoneIndex;
+
+		if (!SolverInternals.Contains(BoneIndex))
+		{
+			continue;
+		}
+
+		EffectorInternal.ParentBoneIndex = SolverInternals[BoneIndex].ParentBoneIndex;
+		EffectorInternal.Location = Effector.Location;
+		EffectorInternal.Rotation = Effector.Rotation;
+
+		bool bValidation = true;
+		while (true)
+		{
+			int32 ParentBoneIndex = SolverInternals[BoneIndex].ParentBoneIndex;
+
+			if (ParentBoneIndex == INDEX_NONE)
+			{
+				bValidation = false;
+				break;
+			}
+			else if (ParentBoneIndex == EffectorInternal.RootBoneIndex)
+			{
+				break;
+			}
+
+			BoneIndex = ParentBoneIndex;
+		}
+		if (!bValidation)
+		{
+			continue;
+		}
+
+		EffectorInternals.Add(EffectorInternal);
+	}
+
+	int32 EffectorCount = EffectorInternals.Num();
+	if (EffectorCount <= 0)
 	{
 		return;
 	}
