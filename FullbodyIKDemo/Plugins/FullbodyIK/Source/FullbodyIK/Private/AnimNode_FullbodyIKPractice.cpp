@@ -396,6 +396,20 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 	{
 		return;
 	}
+
+	for (int32 BoneIndex : BoneIndices)
+	{
+		IAnimInstanceInterface_FullbodyIK::Execute_InitializeBoneOffset(AnimInstanceObject, BoneIndex);
+
+		// 初期Transformを保存
+		const FCompactPoseBoneIndex& CompactPoseBoneIndex = FCompactPoseBoneIndex(BoneIndex);
+		FSolverInternal& SolverInternal = SolverInternals[BoneIndex];
+		SolverInternal.LocalTransform = Context.Pose.GetLocalSpaceTransform(CompactPoseBoneIndex);
+		SolverInternal.ComponentTransform = Context.Pose.GetComponentSpaceTransform(CompactPoseBoneIndex);
+		SolverInternal.InitLocalTransform = SolverInternal.LocalTransform;
+		SolverInternal.InitComponentTransform = SolverInternal.ComponentTransform;
+	}
+
 }
 
 bool FAnimNode_FullbodyIKPractice::IsValidToEvaluate(const USkeleton* Skeleton, const FBoneContainer& RequiredBones)
