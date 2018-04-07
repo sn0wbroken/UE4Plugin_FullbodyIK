@@ -410,6 +410,20 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 		SolverInternal.InitComponentTransform = SolverInternal.ComponentTransform;
 	}
 
+	// Transform更新
+	// LocationOffset, RotationOffsetの現在のポーズへの反映
+	SolveSolver(
+		0,
+		FTransform::Identity,
+		[&](int32 BoneIndex, FVector& SavedOffsetLocation, FVector& CurrentOffsetLocation)
+		{
+			CurrentOffsetLocation += SavedOffsetLocation;
+		},
+		[&](int32 BoneIndex, FVector& SavedOffsetRotation, FVector& CurrentOffsetRotation)
+		{
+			CurrentOffsetRotation += SavedOffsetRotation;
+		}
+	);
 }
 
 bool FAnimNode_FullbodyIKPractice::IsValidToEvaluate(const USkeleton* Skeleton, const FBoneContainer& RequiredBones)
@@ -434,3 +448,23 @@ FFullbodyIKSolver FAnimNode_FullbodyIKPractice::GetSolver(FName BoneName) const
 	Solver.BoneName = BoneName;
 	return Solver;
 }
+
+#if 0
+void FAnimNode_FullbodyIKPractice::SolveSolver(
+	int32 BoneIndex,
+	const FTransform& ParentComponentTransform,
+	const TFunction<void(int32, FVector&, FVector&)>& LocationOffsetProcess,
+	const TFunction<void(int32, FRotator&, FRotator&)>& RotationOffsetProcess)
+{
+	FSolverInternal& SolverInternal = SolverInternals[BoneIndex];
+
+	if (SolverInternal.bTranslation)
+	{
+		FVector SavedOffsetLocation = IAnimInstanceInterface_FullbodyIK::Execute_GetBoneLocationOffset(CachedAnimInstanceObject, BoneIndex);
+		FVector CurrentOffsetLocation = SolverInternal.LocalTransform.GetLocation();
+	}
+	else
+	{
+	}
+}
+#endif
