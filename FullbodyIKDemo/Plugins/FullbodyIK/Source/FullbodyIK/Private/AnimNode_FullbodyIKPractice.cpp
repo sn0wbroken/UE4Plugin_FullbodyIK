@@ -40,7 +40,7 @@ FORCEINLINE FMatrix RotZ(float Yaw)
 	);
 }
 
-FORCEINLINE FMatrix DiffX(float Roll)
+FORCEINLINE FMatrix DiffRotX(float Roll)
 {
 	return FMatrix(
 		FPlane(0, 0, 0, 0),
@@ -50,7 +50,7 @@ FORCEINLINE FMatrix DiffX(float Roll)
 	);
 }
 
-FORCEINLINE FMatrix DiffY(float Pitch)
+FORCEINLINE FMatrix DiffRotY(float Pitch)
 {
 	return FMatrix(
 		FPlane(-SinDegree(Pitch), 0, CosDegree(Pitch), 0),
@@ -60,7 +60,7 @@ FORCEINLINE FMatrix DiffY(float Pitch)
 	);
 }
 
-FORCEINLINE FMatrix DiffZ(float Yaw)
+FORCEINLINE FMatrix DiffRotZ(float Yaw)
 {
 	return FMatrix(
 		FPlane(-SinDegree(Yaw), CosDegree(Yaw), 0, 0),
@@ -263,7 +263,45 @@ void FAnimNode_FullbodyIKPractice::Initialize_AnyThread(const FAnimationInitiali
 		SolverInternals[BoneIndex].BoneIndicesIndex = i;
 	}
 
+	//
 	// 行列のセットアップ
+	//
+
+	// 最大数で確保
+	int32 DisplacementCount = BoneAxisCount;
+
+	// Jはエフェクタまでのジョイント自由度*エフェクタの自由度なのでこうなっている
+	// http://mukai-lab.org/content/JacobianInverseKinematics.pdf
+	// 的に言うと、BoneAxisCountがNでAXIS_COUNTがM。Mが明らかに小さい
+	ElementsJ.SetNumZeroed(DisplacementCount * AXIS_COUNT);
+	ElementsJt.SetNumZeroed(AXIS_COUNT * DisplacementCount);
+	ElementsJtJ.SetNumZeroed(AXIS_COUNT * AXIS_COUNT);
+	ElementsJtJi.SetNumZeroed(AXIS_COUNT * AXIS_COUNT);
+	ElementsJp.SetNumZeroed(AXIS_COUNT * DisplacementCount);
+	ElementsW0.SetNumZeroed(BoneAxisCount);
+	ElementsWi.SetNumZeroed(DisplacementCount * DisplacementCount);
+	ElementsJtWi.SetNumZeroed(AXIS_COUNT * DisplacementCount);
+	ElementsJtWiJ.SetNumZeroed(AXIS_COUNT * AXIS_COUNT);
+	ElementsJtWiJi.SetNumZeroed(AXIS_COUNT * AXIS_COUNT);
+	ElementsJtWiJiJt.SetNumZeroed(AXIS_COUNT * DisplacementCount);
+	ElementsJwp.SetNumZeroed(AXIS_COUNT * DisplacementCount);
+	ElementsRt1.SetNumZeroed(BoneAxisCount);
+	ElementsEta.SetNumZeroed(BoneAxisCount);
+	ElementsEtaJ.SetNumZeroed(AXIS_COUNT);
+	ElementsEtaJJp.SetNumZeroed(BoneAxisCount);
+	ElementsRt2.SetNumZeroed(BoneAxisCount);
+
+#if 0 // TODO:とりあえず加重行列はまだ考えない
+	// 加重行列 W
+	auto W0 = FBuffer(ElementsW0.GetData(), BoneAxisCount);
+	for (int32 i = 0; i < BoneCount; ++i)
+	{
+		int32 BoneIndex = BoneIndices[i];
+		W0.Ref(i * AXIS_COUNT + 0) = SolverInternals[BoneIndex].X.Weight;
+		W0.Ref(i * AXIS_COUNT + 1) = SolverInternals[BoneIndex].Y.Weight;
+		W0.Ref(i * AXIS_COUNT + 2) = SolverInternals[BoneIndex].Z.Weight;
+	}
+#endif
 }
 
 void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentSpacePoseContext& Output, TArray<FBoneTransform>& OutBoneTransforms)

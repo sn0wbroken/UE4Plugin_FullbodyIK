@@ -118,4 +118,22 @@ private:
 	TMap<int32, TArray<int32>> SolverTree;
 
 	FFullbodyIKSolver GetSolver(FName BoneName) const;
+
+	TArray<float> ElementsJ;
+	TArray<float> ElementsJt;
+	TArray<float> ElementsJtJ;
+	TArray<float> ElementsJtJi;
+	TArray<float> ElementsJp;
+	TArray<float> ElementsW0;
+	TArray<float> ElementsWi;
+	TArray<float> ElementsJtWi;
+	TArray<float> ElementsJtWiJ;
+	TArray<float> ElementsJtWiJi;
+	TArray<float> ElementsJtWiJiJt;
+	TArray<float> ElementsJwp;
+	TArray<float> ElementsRt1;
+	TArray<float> ElementsEta;
+	TArray<float> ElementsEtaJ;
+	TArray<float> ElementsEtaJJp;
+	TArray<float> ElementsRt2;
 };
