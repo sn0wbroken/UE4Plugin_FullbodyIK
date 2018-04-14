@@ -215,20 +215,25 @@ void FAnimNode_FullbodyIKPractice::Initialize_AnyThread(const FAnimationInitiali
 	{
 		FName BoneName = IkEndBoneName;
 
-		// IkEndBoneNamesに入っているエフェクタのボーンだけでなく、その先祖のすべてのボーンに対してFFullbodyIKSolverの設定は存在しうる
 		while (true)
 		{
+			// エフェクタから親にさかのぼって行ってすべてSolverInternalとBoneIndicesに登録する
 			int32 BoneIndex = Mesh->GetBoneIndex(BoneName);
-			if (BoneIndex == INDEX_NONE || SolverInternals.Contains(BoneIndex))
+			if (BoneIndex == INDEX_NONE || SolverInternals.Contains(BoneIndex)) // 複数のエフェクタで途中から親を共有したら重複させない
 			{
 				break;
 			}
 
+			// ほげたつさんはワークデータにはInternalという名前をつける模様
+			// ソルバー用のワークデータのマップに、BPから与えたデータを移し替える
+			// BoneIndicesは素直にボーンの配列
+			
 			FSolverInternal& SolverInternal = SolverInternals.Add(BoneIndex, FSolverInternal());
 			BoneIndices.Add(BoneIndex);
 
 			FName ParentBoneName = Mesh->GetParentBone(BoneName);
 			int32 ParentBoneIndex = Mesh->GetBoneIndex(ParentBoneName);
+			// IkEndBoneNamesに入っているエフェクタのボーンだけでなく、その先祖のすべてのボーンに対してFFullbodyIKSolverの設定は存在しうる
 			FFullbodyIKSolver Solver = GetSolver(BoneName);
 
 			SolverInternal.BoneIndex = BoneIndex;
@@ -333,15 +338,17 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 	}
 
 	CachedAnimInstanceObject = AnimInstanceObject;
+	// TODO：これってなんなんだ？
 	CachedComponentTransform = Context.AnimInstanceProxy->GetComponentTransform();
 
-	// エフェクタ
-	// BPから渡されたデータをFEffectorInternalに移し替える
+	// BPから渡されたFAnimNode_FullbodyIkEffectorPracticeデータをFEffectorInternalに移し替える
+	// ほげたつさんのデモだとEffectorsは各キャラアクタのBPで作っている
 	TArray<FEffectorInternal> EffectorInternals;
 	for (const FAnimNode_FullbodyIkEffectorPractice& Effector : Effectors.Effectors)
 	{
 		if (Effector.EffectorBoneName == NAME_None || Effector.RootBoneName == NAME_None)
 		{
+			// 対象のボーン名を指定してないFAnimNode_FullbodyIkEffectorPracticeは無効
 			continue;
 		}
 
@@ -352,6 +359,7 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 
 		if (EffectorInternal.EffectorBoneIndex == INDEX_NONE || EffectorInternal.RootBoneIndex == INDEX_NONE)
 		{
+			// 対象のボーン名を指定しててもスケルトンにそのボーンがなければFAnimNode_FullbodyIkEffectorPracticeは無効
 			continue;
 		}
 		
@@ -359,6 +367,7 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 
 		if (!SolverInternals.Contains(BoneIndex))
 		{
+			// SolverInternalsにそのボーンが登録されてなければ無効。FAnimNode_FullbodyIkEffectorPracticeの設定がどのエフェクタにも影響しないということなので。
 			continue;
 		}
 
@@ -366,6 +375,7 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 		EffectorInternal.Location = Effector.Location;
 		EffectorInternal.Rotation = Effector.Rotation;
 
+		// EffectorBoneNameで与えられたボーンを親にさかのぼっていってRootBoneNameで指定した親に一致しなければ無効
 		bool bValidation = true;
 		while (true)
 		{
@@ -412,6 +422,8 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 
 	// Transform更新
 	// LocationOffset, RotationOffsetの現在のポーズへの反映
+#if 0
+	// TODO:枝葉の部分なので実装は後回し
 	SolveSolver(
 		0,
 		FTransform::Identity,
@@ -424,6 +436,123 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 			CurrentOffsetRotation += SavedOffsetRotation;
 		}
 	);
+
+	// 重心の更新
+	UpdateCenterOfMass();
+#endif
+
+	int32 StepLoopCount = 0; // 反復計算をするので、ループの最大数の定義は必要
+	// 反復のステップ数制限だけだとエフェクタが多ければステップ数上限を超えなくても計算回数は増えるので
+	// 実際にポーズを計算した回数にも制限をもうける
+	int32 EffectiveCount = 0;
+	while (Setting->StepLoopCountMax > 0 && Setting->EffectiveCountMax && StepLoopCount < Setting->StepLoopCountMax)
+	{
+		for (int32 EffectorIndex = 0; EffectorIndex < EffectorCount; ++EffectorIndex)
+		{
+			// ここが計算の肝
+			const FEffectorInternal& Effector = EffectorInternals[EffectorIndex];
+			// TODO:なんだこれ？
+			float EffectorStep[AXIS_COUNT];
+			float EtaStep = 0.0f;
+
+			FMemory::Memzero(EffectorStep, sizeof(float) * AXIS_COUNT);
+
+			int32 DisplacementCount = 0;
+			switch (Effector.EffectorType)
+			{
+			case EFullbodyIkEffectorTypePractice::KeepLocation:
+				{
+					DisplacementCount = BoneAxisCount;
+				}
+				break;
+			case EFullbodyIkEffectorTypePractice::KeepRotation:
+				{
+					DisplacementCount = BoneAxisCount;
+				}
+				break;
+			case EFullbodyIkEffectorTypePractice::KeepLocationAndRotation:
+				{
+					DisplacementCount = BoneAxisCount;
+				}
+				break;
+			case EFullbodyIkEffectorTypePractice::FollowOriginalLocation:
+				{
+					DisplacementCount = BoneAxisCount;
+				}
+				break;
+			case EFullbodyIkEffectorTypePractice::FollowOriginalRotation:
+				{
+					DisplacementCount = BoneAxisCount;
+				}
+				break;
+			case EFullbodyIkEffectorTypePractice::FollowOriginalLocationAndRotation:
+				{
+					DisplacementCount = BoneAxisCount;
+				}
+				break;
+			}
+
+			if (DisplacementCount <= 0)
+			{
+				continue;
+			}
+
+			if (EtaStep <= 0.0f)
+			{
+				continue;
+			}
+
+			EtaStep /= Setting->StepSize;
+
+
+#if 0
+			// Transform更新
+			SolveSolver(0, FTransform::Identity,
+				[&](int32 BoneIndex, FVector& SavedOffsetLocation, FVector& CurrentOffsetLocation)
+				{
+					int32 BoneIndicesIndex = SolverInternals[BoneIndex].BoneIndicesIndex;
+
+					FVector DeltaLocation = FVector(
+						Rt1.Ref(BoneIndicesIndex * AXIS_COUNT + 0) + Rt2.Ref(BoneIndicesIndex * AXIS_COUNT + 0),	// X
+						Rt1.Ref(BoneIndicesIndex * AXIS_COUNT + 1) + Rt2.Ref(BoneIndicesIndex * AXIS_COUNT + 1),	// Y
+						Rt1.Ref(BoneIndicesIndex * AXIS_COUNT + 2) + Rt2.Ref(BoneIndicesIndex * AXIS_COUNT + 2)		// Z
+					);
+
+					SavedOffsetLocation += DeltaLocation;
+					CurrentOffsetLocation += DeltaLocation;
+				},
+				[&](int32 BoneIndex, FRotator& SavedOffsetRotation, FRotator& CurrentOffsetRotation)
+				{
+					int32 BoneIndicesIndex = SolverInternals[BoneIndex].BoneIndicesIndex;
+
+					FRotator DeltaRotation = FRotator(
+						FMath::RadiansToDegrees(Rt1.Ref(BoneIndicesIndex * AXIS_COUNT + 1) + Rt2.Ref(BoneIndicesIndex * AXIS_COUNT + 1)),	// Pitch
+						FMath::RadiansToDegrees(Rt1.Ref(BoneIndicesIndex * AXIS_COUNT + 2) + Rt2.Ref(BoneIndicesIndex * AXIS_COUNT + 2)),	// Yaw
+						FMath::RadiansToDegrees(Rt1.Ref(BoneIndicesIndex * AXIS_COUNT + 0) + Rt2.Ref(BoneIndicesIndex * AXIS_COUNT + 0))	// Roll
+					);
+
+					SavedOffsetRotation += DeltaRotation;
+					CurrentOffsetRotation += DeltaRotation;
+				}
+			);
+#endif
+
+			++EffectiveCount;
+
+			if (EffectiveCount >= Setting->EffectiveCountMax)
+			{
+				break;
+			}
+		}
+
+		++StepLoopCount;
+	}
+
+	// 計算結果をノードの出力に反映。フルボディIKに関わるすべてのボーン（BoneIndicesに含まれるもの）に反映させる
+	for (int32 BoneIndex : BoneIndices)
+	{
+		OutBoneTransforms.Add(FBoneTransform(FCompactPoseBoneIndex(BoneIndex), SolverInternals[BoneIndex].ComponentTransform));
+	}
 }
 
 bool FAnimNode_FullbodyIKPractice::IsValidToEvaluate(const USkeleton* Skeleton, const FBoneContainer& RequiredBones)
@@ -437,6 +566,7 @@ FFullbodyIKSolver FAnimNode_FullbodyIKPractice::GetSolver(FName BoneName) const
 
 	for (const FFullbodyIKSolver& Solver : Setting->Solvers)
 	{
+		// アニメーションBPはロジックをボーン名に頼りがち
 		if (Solver.BoneName == BoneName)
 		{
 			return Solver;
