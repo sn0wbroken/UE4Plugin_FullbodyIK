@@ -462,31 +462,207 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 			{
 			case EFullbodyIkEffectorTypePractice::KeepLocation:
 				{
+					FVector EndSolverLocation = GetWorldSpaceBoneLocation(Effector.EffectorBoneIndex);
+					FVector DeltaLocation = Effector.Location - EndSolverLocation;
+					float DeltaLocationSize = DeltaLocation.Size();
+
+					if (DeltaLocationSize > Setting->ConvergenceDistance) // TODO:なんじゃこれ？
+					{
+						float Step = FMath::Min(Setting->StepSize, DeltaLocationSize);
+						EtaStep += Step;
+						FVector StepV = DeltaLocation / DeltaLocationSize * Step;
+						EffectorStep[0] = StepV.X;
+						EffectorStep[1] = StepV.Y;
+						EffectorStep[2] = StepV.Z;
+					}
+
 					DisplacementCount = BoneAxisCount;
 				}
 				break;
 			case EFullbodyIkEffectorTypePractice::KeepRotation:
 				{
+					const FSolverInternal& SolverInternal = SolverInternals[Effector.EffectorBoneIndex];
+
+#if 0
+					// Transform更新 // TODO:このSolveSolverが何をしてるかをまだわかってないな。。。
+					SolveSolver(
+						0,
+						FTransform::Identity,
+						[&](int32 BoneIndex, FVector& SavedOffsetLocation, FVector& CurrentOffsetLocation)
+						{
+						},
+						[&](int32 BoneIndex, FRotator& SavedOffsetRotation, FRotator& CurrentOffsetRotation)
+						{
+							if (BoneIndex != Effector.EffectorBoneIndex)
+							{
+								return;
+							}
+
+							FTransform EffectorWorldTransform = FTransform(Effector.Rotation);
+							FTransform EffectorComponentTransform = EffectorWorldTransform * CachedComponentTransform.Inverse();
+							FTransform EffectorLocalTransform = EffectorComponentTransform * SolverInternals[SolverInternal.ParentBoneIndex].ComponentTransform.Inverse();
+
+							FRotator EffectorLocalRotation = EffectorLocalTransform.Rotator();
+							FRotator DeltaLocalRotation = EffectorLocalRotation - CurrentOffsetRotation;
+
+							SavedOffsetRotation += DeltaLocalRotation;
+							CurrentOffsetRotation += DeltaLocalRotation;
+						}
+					);
+#endif
 					DisplacementCount = BoneAxisCount;
 				}
 				break;
 			case EFullbodyIkEffectorTypePractice::KeepLocationAndRotation:
 				{
+					const FSolverInternal& SolverInternal = SolverInternals[Effector.EffectorBoneIndex];
+
+#if 0
+					// KeepRotation側にあたる処理
+					// Transform更新
+					SolveSolver(0, FTransform::Identity,
+						[&](int32 BoneIndex, FVector& SavedOffsetLocation, FVector& CurrentOffsetLocation)
+						{
+						},
+						[&](int32 BoneIndex, FRotator& SavedOffsetRotation, FRotator& CurrentOffsetRotation)
+						{
+							if (BoneIndex != Effector.EffectorBoneIndex)
+							{
+								return;
+							}
+
+							FTransform EffectorWorldTransform = FTransform(Effector.Rotation);
+							FTransform EffectorComponentTransform = EffectorWorldTransform * CachedComponentTransform.Inverse();
+							FTransform EffectorLocalTransform = EffectorComponentTransform * SolverInternals[SolverInternal.ParentBoneIndex].ComponentTransform.Inverse();
+
+							FRotator EffectorLocalRotation = EffectorLocalTransform.Rotator();
+							FRotator DeltaLocalRotation = EffectorLocalRotation - CurrentOffsetRotation;
+
+							SavedOffsetRotation += DeltaLocalRotation;
+							CurrentOffsetRotation += DeltaLocalRotation;
+						}
+					);
+#endif
+
+					// KeepLocation側にあたる処理
+					FVector EndSolverLocation = GetWorldSpaceBoneLocation(Effector.EffectorBoneIndex);
+					FVector DeltaLocation = Effector.Location - EndSolverLocation;
+					float DeltaLocationSize = DeltaLocation.Size();
+
+					if (DeltaLocationSize > Setting->ConvergenceDistance) // TODO:なんじゃこれ？
+					{
+						float Step = FMath::Min(Setting->StepSize, DeltaLocationSize);
+						EtaStep += Step;
+						FVector StepV = DeltaLocation / DeltaLocationSize * Step;
+						EffectorStep[0] = StepV.X;
+						EffectorStep[1] = StepV.Y;
+						EffectorStep[2] = StepV.Z;
+					}
+
 					DisplacementCount = BoneAxisCount;
 				}
 				break;
 			case EFullbodyIkEffectorTypePractice::FollowOriginalLocation:
 				{
+					const FSolverInternal& SolverInternal = SolverInternals[Effector.EffectorBoneIndex];
+					FTransform InitWorldTransform = SolverInternal.InitComponentTransform * CachedComponentTransform; //TODO:なぜこの計算でワールド行列が手に入るのか？
+
+					FVector EndSolverLocation = GetWorldSpaceBoneLocation(Effector.EffectorBoneIndex);
+					FVector DeltaLocation = InitWorldTransform.GetLocation() + CachedComponentTransform.TransformVector(Effector.Location) - EndSolverLocation; // TODO:なぜこれが目標位置への差分になるのか？
+					float DeltaLocationSize = DeltaLocation.Size();
+
+					if (DeltaLocationSize > Setting->ConvergenceDistance) // TODO:なんじゃこれ？
+					{
+						float Step = FMath::Min(Setting->StepSize, DeltaLocationSize);
+						EtaStep += Step;
+						FVector StepV = DeltaLocation / DeltaLocationSize * Step;
+						EffectorStep[0] = StepV.X;
+						EffectorStep[1] = StepV.Y;
+						EffectorStep[2] = StepV.Z;
+					}
+
 					DisplacementCount = BoneAxisCount;
 				}
 				break;
 			case EFullbodyIkEffectorTypePractice::FollowOriginalRotation:
 				{
+					const FSolverInternal& SolverInternal = SolverInternals[Effector.EffectorBoneIndex];
+					FTransform InitWorldTransform = SolverInternal.InitComponentTransform * CachedComponentTransform; //TODO:なぜこの計算でワールド行列が手に入るのか？
+
+#if 0
+					// Transform更新
+					SolveSolver(0, FTransform::Identity,
+						[&](int32 BoneIndex, FVector& SavedOffsetLocation, FVector& CurrentOffsetLocation)
+						{
+						},
+						[&](int32 BoneIndex, FRotator& SavedOffsetRotation, FRotator& CurrentOffsetRotation)
+						{
+							if (BoneIndex != Effector.EffectorBoneIndex)
+							{
+								return;
+							}
+
+							FTransform EffectorWorldTransform = FTransform(InitWorldTransform.Rotator());
+							FTransform EffectorComponentTransform = EffectorWorldTransform * CachedComponentTransform.Inverse();
+							FTransform EffectorLocalTransform = EffectorComponentTransform * SolverInternals[SolverInternal.ParentBoneIndex].ComponentTransform.Inverse();
+
+							FRotator EffectorLocalRotation = EffectorLocalTransform.Rotator();
+							FRotator DeltaLocalRotation = EffectorLocalRotation + Effector.Rotation - CurrentOffsetRotation;
+
+							SavedOffsetRotation += DeltaLocalRotation;
+							CurrentOffsetRotation += DeltaLocalRotation;
+						}
+					);
+#endif
+
 					DisplacementCount = BoneAxisCount;
 				}
 				break;
 			case EFullbodyIkEffectorTypePractice::FollowOriginalLocationAndRotation:
 				{
+					const FSolverInternal& SolverInternal = SolverInternals[Effector.EffectorBoneIndex];
+					FTransform InitWorldTransform = SolverInternal.InitComponentTransform * CachedComponentTransform; //TODO:なぜこの計算でワールド行列が手に入るのか？
+
+#if 0
+					// FollowOriginalRotationにあたる処理
+					// Transform更新
+					SolveSolver(0, FTransform::Identity,
+						[&](int32 BoneIndex, FVector& SavedOffsetLocation, FVector& CurrentOffsetLocation)
+						{
+						},
+						[&](int32 BoneIndex, FRotator& SavedOffsetRotation, FRotator& CurrentOffsetRotation)
+						{
+							if (BoneIndex != Effector.EffectorBoneIndex)
+							{
+								return;
+							}
+
+							FTransform EffectorWorldTransform = FTransform(InitWorldTransform.Rotator());
+							FTransform EffectorComponentTransform = EffectorWorldTransform * CachedComponentTransform.Inverse();
+							FTransform EffectorLocalTransform = EffectorComponentTransform * SolverInternals[SolverInternal.ParentBoneIndex].ComponentTransform.Inverse();
+
+							FRotator EffectorLocalRotation = EffectorLocalTransform.Rotator();
+							FRotator DeltaLocalRotation = EffectorLocalRotation + Effector.Rotation - CurrentOffsetRotation;
+
+							SavedOffsetRotation += DeltaLocalRotation;
+							CurrentOffsetRotation += DeltaLocalRotation;
+						}
+					);
+#endif
+					FVector EndSolverLocation = GetWorldSpaceBoneLocation(Effector.EffectorBoneIndex);
+					FVector DeltaLocation = InitWorldTransform.GetLocation() + CachedComponentTransform.TransformVector(Effector.Location) - EndSolverLocation; // TODO:なぜこれが目標位置への差分になるのか？
+					float DeltaLocationSize = DeltaLocation.Size();
+
+					if (DeltaLocationSize > Setting->ConvergenceDistance) // TODO:なんじゃこれ？
+					{
+						float Step = FMath::Min(Setting->StepSize, DeltaLocationSize);
+						EtaStep += Step;
+						FVector StepV = DeltaLocation / DeltaLocationSize * Step;
+						EffectorStep[0] = StepV.X;
+						EffectorStep[1] = StepV.Y;
+						EffectorStep[2] = StepV.Z;
+					}
+
 					DisplacementCount = BoneAxisCount;
 				}
 				break;
@@ -577,6 +753,44 @@ FFullbodyIKSolver FAnimNode_FullbodyIKPractice::GetSolver(FName BoneName) const
 	FFullbodyIKSolver Solver;
 	Solver.BoneName = BoneName;
 	return Solver;
+}
+
+FTransform FAnimNode_FullbodyIKPractice::GetWorldSpaceBoneTransform(const int32& BoneIndex) const
+{
+	FTransform Transform = SolverInternals[BoneIndex].ComponentTransform;
+	Transform *= CachedComponentTransform; //TODO:なぜこの計算でワールド行列が手に入るのか？
+	return Transform;
+}
+
+FVector FAnimNode_FullbodyIKPractice::GetWorldSpaceBoneLocation(const int32& BoneIndex) const
+{
+	FTransform Transform = SolverInternals[BoneIndex].ComponentTransform;
+	Transform *= CachedComponentTransform;
+	return Transform.GetLocation();
+}
+
+FQuat FAnimNode_FullbodyIKPractice::GetWorldSpaceBoneRotation(const int32& BoneIndex) const
+{
+	FTransform Transform = SolverInternals[BoneIndex].ComponentTransform;
+	Transform *= CachedComponentTransform;
+	return Transform.GetRotation();
+}
+
+FTransform FAnimNode_FullbodyIKPractice::GetLocalSpaceBoneTransform(const int32& BoneIndex) const
+{
+	return SolverInternals[BoneIndex].LocalTransform;
+}
+
+FVector FAnimNode_FullbodyIKPractice::GetLocalSpaceBoneLocation(const int32& BoneIndex) const
+{
+	FTransform Transform = SolverInternals[BoneIndex].LocalTransform;
+	return Transform.GetLocation();
+}
+
+FQuat FAnimNode_FullbodyIKPractice::GetLocalSpaceBoneRotation(const int32& BoneIndex) const
+{
+	FTransform Transform = SolverInternals[BoneIndex].LocalTransform;
+	return Transform.GetRotation();
 }
 
 #if 0

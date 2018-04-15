@@ -190,6 +190,13 @@ private:
 
 	FFullbodyIKSolver GetSolver(FName BoneName) const;
 
+	FTransform GetWorldSpaceBoneTransform(const int32& BoneIndex) const;
+	FVector GetWorldSpaceBoneLocation(const int32& BoneIndex) const;
+	FQuat GetWorldSpaceBoneRotation(const int32& BoneIndex) const;
+	FTransform GetLocalSpaceBoneTransform(const int32& BoneIndex) const;
+	FVector GetLocalSpaceBoneLocation(const int32& BoneIndex) const;
+	FQuat GetLocalSpaceBoneRotation(const int32& BoneIndex) const;
+
 #if 0
 	void SolveSolver(
 		int32 BoneIndex,
