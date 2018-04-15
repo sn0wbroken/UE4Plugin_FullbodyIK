@@ -197,6 +197,8 @@ private:
 	FVector GetLocalSpaceBoneLocation(const int32& BoneIndex) const;
 	FQuat GetLocalSpaceBoneRotation(const int32& BoneIndex) const;
 
+	void CalcJacobian(const FEffectorInternal& EffectorInternal, float* Jacobian);
+
 #if 0
 	void SolveSolver(
 		int32 BoneIndex,

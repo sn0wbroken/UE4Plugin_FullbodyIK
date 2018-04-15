@@ -278,6 +278,8 @@ void FAnimNode_FullbodyIKPractice::Initialize_AnyThread(const FAnimationInitiali
 	// Jはエフェクタまでのジョイント自由度*エフェクタの自由度なのでこうなっている
 	// http://mukai-lab.org/content/JacobianInverseKinematics.pdf
 	// 的に言うと、BoneAxisCountがNでAXIS_COUNTがM。Mが明らかに小さい
+	// Jには、全エフェクタのデータを入れていると勘違いしないように
+	// 各エフェクタのIK計算でそのエフェクタだけの情報を入れて使いまわす
 	ElementsJ.SetNumZeroed(DisplacementCount * AXIS_COUNT);
 	ElementsJt.SetNumZeroed(AXIS_COUNT * DisplacementCount);
 	ElementsJtJ.SetNumZeroed(AXIS_COUNT * AXIS_COUNT);
@@ -680,6 +682,141 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 
 			EtaStep /= Setting->StepSize;
 
+			FBuffer& J = FBuffer(ElementsJ.GetData(), DisplacementCount, AXIS_COUNT);
+			FBuffer& Jt = FBuffer(ElementsJt.GetData(), AXIS_COUNT, DisplacementCount);
+			FBuffer& JtJ = FBuffer(ElementsJtJ.GetData(), AXIS_COUNT, AXIS_COUNT);
+			FBuffer& JtJi = FBuffer(ElementsJtJi.GetData(), AXIS_COUNT, AXIS_COUNT);
+			FBuffer& Jp = FBuffer(ElementsJp.GetData(), AXIS_COUNT, DisplacementCount);
+			FBuffer& W0 = FBuffer(ElementsW0.GetData(), BoneAxisCount);
+			FBuffer& Wi = FBuffer(ElementsWi.GetData(), DisplacementCount, DisplacementCount);
+			FBuffer& JtWi = FBuffer(ElementsJtWi.GetData(), AXIS_COUNT, DisplacementCount);
+			FBuffer& JtWiJ = FBuffer(ElementsJtWiJ.GetData(), AXIS_COUNT, AXIS_COUNT);
+			FBuffer& JtWiJi = FBuffer(ElementsJtWiJi.GetData(), AXIS_COUNT, AXIS_COUNT);
+			FBuffer& JtWiJiJt = FBuffer(ElementsJtWiJiJt.GetData(), AXIS_COUNT, DisplacementCount);
+			FBuffer& Jwp = FBuffer(ElementsJwp.GetData(), AXIS_COUNT, DisplacementCount);
+			FBuffer& Rt1 = FBuffer(ElementsRt1.GetData(), BoneAxisCount);
+			FBuffer& Eta = FBuffer(ElementsEta.GetData(), BoneAxisCount);
+			FBuffer& EtaJ = FBuffer(ElementsEtaJ.GetData(), AXIS_COUNT);
+			FBuffer& EtaJJp = FBuffer(ElementsEtaJJp.GetData(), BoneAxisCount);
+			FBuffer& Rt2 = FBuffer(ElementsRt2.GetData(), BoneAxisCount);
+
+			// ヤコビアン J
+			// auto J = FBuffer(DisplacementCount, AXIS_COUNT);
+			J.Reset();
+
+			switch (Effector.EffectorType)
+			{
+				// TODO:なぜKeepRotationとFollowOriginalLocationはヤコビアンを計算しない？
+			case EFullbodyIkEffectorTypePractice::KeepLocation:
+			case EFullbodyIkEffectorTypePractice::KeepLocationAndRotation:
+			case EFullbodyIkEffectorTypePractice::FollowOriginalLocation:
+			case EFullbodyIkEffectorTypePractice::FollowOriginalLocationAndRotation:
+				{
+					CalcJacobian(Effector, J.Ptr());
+				}
+				break;
+			}
+
+			// J^T
+			// auto Jt = FBuffer(AXIS_COUNT, DisplacementCount);
+			Jt.Reset();
+			MatrixTranspose(Jt.Ptr(), J.Ptr(), DisplacementCount, AXIS_COUNT);
+
+			// J^T * J
+			// auto JtJ = FBuffer(AXIS_COUNT, AXIS_COUNT);
+			JtJ.Reset();
+			MatrixMultiply(
+				JtJ.Ptr(),
+				Jt.Ptr(),
+				AXIS_COUNT, DisplacementCount,
+				J.Ptr(),
+				DisplacementCount, AXIS_COUNT
+			);
+
+			// (J^T * J)^-1
+			// auto JtJi = FBuffer(AXIS_COUNT, AXIS_COUNT);
+			JtJi.Reset();
+			float DetJtJi = MatrixInverse3(JtJi.Ptr(), JtJ.Ptr());
+			if (DetJtJi == 0)
+			{
+				continue
+					;
+			}
+
+			// ヤコビアン擬似逆行列 (J^T * J)^-1 * J^T
+			// auto Jp = FBuffer(AXIS_COUNT, DisplacementCount);
+			Jp.Reset();
+			MatrixMultiply(
+				Jp.Ptr(),
+				JtJi.Ptr(),
+				AXIS_COUNT, AXIS_COUNT,
+				Jt.Ptr(),
+				AXIS_COUNT, DisplacementCount
+			);
+
+#if 0 //TODO: 加重行列に関する部分はとりあえず省略
+			// W^-1
+			// auto Wi = FBuffer(DisplacementCount, DisplacementCount);
+			Wi.Reset();
+			for (int32 i = 0; i < DisplacementCount; ++i)
+			{
+				Wi.Ref(i, i) = 1.0f / W0.Ref(i % BoneAxisCount);
+			}
+
+			// J^T * W^-1
+			// auto JtWi = FBuffer(AXIS_COUNT, DisplacementCount);
+			JtWi.Reset();
+			MatrixMultiply(
+				JtWi.Ptr(),
+				Jt.Ptr(), AXIS_COUNT, DisplacementCount,
+				Wi.Ptr(), DisplacementCount, DisplacementCount
+			);
+
+			// J^T * W^-1 * J
+			// auto JtWiJ = FBuffer(AXIS_COUNT, AXIS_COUNT);
+			JtWiJ.Reset();
+			MatrixMultiply(
+				JtWiJ.Ptr(),
+				JtWi.Ptr(), AXIS_COUNT, DisplacementCount,
+				J.Ptr(), DisplacementCount, AXIS_COUNT
+			);
+			for (int32 i = 0; i < AXIS_COUNT; ++i)
+			{
+				JtWiJ.Ref(i, i) += Setting->JtJInverseBias;
+			}
+
+			// (J^T * W^-1 * J)^-1
+			// auto JtWiJi = FBuffer(AXIS_COUNT, AXIS_COUNT);
+			JtWiJi.Reset();
+			float DetJtWiJ = MatrixInverse3(JtWiJi.Ptr(), JtWiJ.Ptr());
+			if (DetJtWiJ == 0)
+			{
+				continue;
+			}
+
+			// (J^T * W^-1 * J)^-1 * J^T
+			// auto JtWiJiJt = FBuffer(AXIS_COUNT, DisplacementCount);
+			JtWiJiJt.Reset();
+			MatrixMultiply(
+				JtWiJiJt.Ptr(),
+				JtWiJi.Ptr(), AXIS_COUNT, AXIS_COUNT,
+				Jt.Ptr(), AXIS_COUNT, DisplacementCount
+			);
+
+			// ヤコビアン加重逆行列 (J^T * W^-1 * J)^-1 * J^T * W^-1
+			// auto Jwp = FBuffer(AXIS_COUNT, DisplacementCount);
+			Jwp.Reset();
+			MatrixMultiply(
+				Jwp.Ptr(),
+				JtWiJiJt.Ptr(), AXIS_COUNT, DisplacementCount,
+				Wi.Ptr(), DisplacementCount, DisplacementCount
+			);
+#endif
+			// 関節角度ベクトル1 目標エフェクタ変位 * ヤコビアン加重逆行列
+			// auto Rt1 = FBuffer(BoneAxisCount);
+
+
+
 
 #if 0
 			// Transform更新
@@ -791,6 +928,91 @@ FQuat FAnimNode_FullbodyIKPractice::GetLocalSpaceBoneRotation(const int32& BoneI
 {
 	FTransform Transform = SolverInternals[BoneIndex].LocalTransform;
 	return Transform.GetRotation();
+}
+
+void FAnimNode_FullbodyIKPractice::CalcJacobian(const FEffectorInternal& EffectorInternal, float* Jacobian)
+{
+	// ここが呼び出し回数が多く一番計算負荷がかかるはず
+	int32 BoneIndex = EffectorInternal.EffectorBoneIndex;
+	const FVector& EndSolverLocation = GetWorldSpaceBoneLocation(BoneIndex);
+	BoneIndex = SolverInternals[BoneIndex].ParentBoneIndex;
+
+	while (true)
+	{
+		const FSolverInternal& SolverInternal = SolverInternals[BoneIndex];
+		int32 ParentBoneIndex = SolverInternals[BoneIndex].ParentBoneIndex;
+
+		FQuat ParentWorldRotation = FQuat::Identity;
+		if (ParentBoneIndex != INDEX_NONE)
+		{
+			ParentWorldRotation = GetWorldSpaceBoneRotation(ParentBoneIndex);
+		}
+
+		if (SolverInternal.bTranslation) //TODO:これってなんだろう？ヤコビアンって変数としてジョイントのオイラー角しか考慮してないって思ってたけど、実はtranslationも考慮してるってこと？
+		{
+			FVector DVec[AXIS_COUNT];
+			DVec[0] = FVector(1, 0, 0);
+			DVec[1] = FVector(0, 1, 0);
+			DVec[2] = FVector(0, 0, 1);
+			// 多分、Tが、
+			// T=|000X|
+			//   |000Y|
+			//   |000Z|
+			//   |0001|
+			// なので、それをX,Y,Zでそれぞれ微分したものは上記ベクトルにあたるのだろう
+			// それとも、そもそも最初からオイラー角以外はIK計算には入れるつもりはなく、微分なんてしてないのか？
+			// if (SolverInternal.bTranslation)のelse側を見ると、どうも微分なんてしてないように見えるが
+
+			for (int32 Axis = 0; Axis < AXIS_COUNT; ++Axis)
+			{
+				// Jacobian[BoneCount * AXIS_COUNT][AXIS_COUNT]
+				int32 JacobianIndex1 = SolverInternal.BoneIndicesIndex * AXIS_COUNT;
+				int32 JacobianIndex2 = Axis;
+
+				// TODO:ここが肝なのだがどうもよくわからないな。。一体何を計算しているんだ？
+				// BoneIndexより子孫のやつのRotationを無視する、ということに見えるが
+				FVector DVec3 = ParentWorldRotation.RotateVector(DVec[Axis]);
+
+				// [行の番号*AXIS_COUNT + 列の番号] 列の数がAXIS_COUNTなので
+				Jacobian[(JacobianIndex1 + JacobianIndex2) * AXIS_COUNT + 0] = DVec3.X;
+				Jacobian[(JacobianIndex1 + JacobianIndex2) * AXIS_COUNT + 1] = DVec3.Y;
+				Jacobian[(JacobianIndex1 + JacobianIndex2) * AXIS_COUNT + 2] = DVec3.Z;
+			}
+		}
+		else
+		{
+			// こっちは普通のヤコビアンの計算方法なので理解できる
+			FVector DeltaLocation = EndSolverLocation - GetWorldSpaceBoneLocation(BoneIndex);
+			FVector UnrotateDeltaLocation = GetWorldSpaceBoneRotation(BoneIndex).UnrotateVector(DeltaLocation);
+			FRotator BoneRotation = GetLocalSpaceBoneRotation(BoneIndex).Rotator();
+			FMatrix DMat[AXIS_COUNT];
+
+			DMat[0] = DiffRotX(BoneRotation.Roll) * RotY(BoneRotation.Pitch) * RotZ(BoneRotation.Yaw);
+			DMat[1] = RotX(BoneRotation.Roll) * DiffRotY(BoneRotation.Pitch) * RotZ(BoneRotation.Yaw);
+			DMat[2] = RotX(BoneRotation.Roll) * RotY(BoneRotation.Pitch) * DiffRotZ(BoneRotation.Yaw);
+
+			for (int32 Axis = 0; Axis < AXIS_COUNT; ++Axis)
+			{
+				// Jacobian[BoneCount * AXIS_COUNT][AXIS_COUNT]
+				int32 JacobianIndex1 = SolverInternal.BoneIndicesIndex * AXIS_COUNT;
+				int32 JacobianIndex2 = Axis;
+
+				FVector4 DVec4 = DMat[Axis].TransformVector(UnrotateDeltaLocation);
+				FVector DVec3 = ParentWorldRotation.RotateVector(FVector(DVec4));
+
+				Jacobian[(JacobianIndex1 + JacobianIndex2) * AXIS_COUNT + 0] = DVec3.X;
+				Jacobian[(JacobianIndex1 + JacobianIndex2) * AXIS_COUNT + 1] = DVec3.Y;
+				Jacobian[(JacobianIndex1 + JacobianIndex2) * AXIS_COUNT + 2] = DVec3.Z;
+			}
+		}
+
+		if (BoneIndex = EffectorInternal.RootBoneIndex || ParentBoneIndex == INDEX_NONE)
+		{
+			break;
+		}
+
+		BoneIndex = ParentBoneIndex;
+	}
 }
 
 #if 0
