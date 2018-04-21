@@ -298,9 +298,8 @@ void FAnimNode_FullbodyIKPractice::Initialize_AnyThread(const FAnimationInitiali
 	ElementsEtaJJp.SetNumZeroed(BoneAxisCount);
 	ElementsRt2.SetNumZeroed(BoneAxisCount);
 
-#if 0 // TODO:とりあえず加重行列はまだ考えない
 	// 加重行列 W
-	auto W0 = FBuffer(ElementsW0.GetData(), BoneAxisCount);
+	FBuffer& W0 = FBuffer(ElementsW0.GetData(), BoneAxisCount);
 	for (int32 i = 0; i < BoneCount; ++i)
 	{
 		int32 BoneIndex = BoneIndices[i];
@@ -308,7 +307,6 @@ void FAnimNode_FullbodyIKPractice::Initialize_AnyThread(const FAnimationInitiali
 		W0.Ref(i * AXIS_COUNT + 1) = SolverInternals[BoneIndex].Y.Weight;
 		W0.Ref(i * AXIS_COUNT + 2) = SolverInternals[BoneIndex].Z.Weight;
 	}
-#endif
 }
 
 void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentSpacePoseContext& Context, TArray<FBoneTransform>& OutBoneTransforms)
@@ -754,13 +752,13 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 				AXIS_COUNT, DisplacementCount
 			);
 
-#if 0 //TODO: 加重行列に関する部分はとりあえず省略
 			// W^-1
 			// auto Wi = FBuffer(DisplacementCount, DisplacementCount);
 			Wi.Reset();
 			for (int32 i = 0; i < DisplacementCount; ++i)
 			{
-				Wi.Ref(i, i) = 1.0f / W0.Ref(i % BoneAxisCount);
+				//TODO: Wは正定値対象行列らしいが、それで対角項の逆値をとるだけでいいのか？
+				Wi.Ref(i, i) = 1.0f / W0.Ref(i % BoneAxisCount); // TODO:なんだこの計算？
 			}
 
 			// J^T * W^-1
@@ -768,8 +766,10 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 			JtWi.Reset();
 			MatrixMultiply(
 				JtWi.Ptr(),
-				Jt.Ptr(), AXIS_COUNT, DisplacementCount,
-				Wi.Ptr(), DisplacementCount, DisplacementCount
+				Jt.Ptr(),
+				AXIS_COUNT, DisplacementCount,
+				Wi.Ptr(),
+				DisplacementCount, DisplacementCount
 			);
 
 			// J^T * W^-1 * J
@@ -777,18 +777,20 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 			JtWiJ.Reset();
 			MatrixMultiply(
 				JtWiJ.Ptr(),
-				JtWi.Ptr(), AXIS_COUNT, DisplacementCount,
-				J.Ptr(), DisplacementCount, AXIS_COUNT
+				JtWi.Ptr(),
+				AXIS_COUNT, DisplacementCount,
+				J.Ptr(),
+				DisplacementCount, AXIS_COUNT
 			);
 			for (int32 i = 0; i < AXIS_COUNT; ++i)
 			{
-				JtWiJ.Ref(i, i) += Setting->JtJInverseBias;
+				JtWiJ.Ref(i, i) += Setting->JtJInverseBias; // TODO:なんだこれ？
 			}
 
 			// (J^T * W^-1 * J)^-1
 			// auto JtWiJi = FBuffer(AXIS_COUNT, AXIS_COUNT);
 			JtWiJi.Reset();
-			float DetJtWiJ = MatrixInverse3(JtWiJi.Ptr(), JtWiJ.Ptr());
+			float DetJtWiJ = MatrixInverse3(JtWiJi.Ptr(), JtWiJ.Ptr()); // TODO:なぜJtWiJの逆行列がJtWiJiなのか？
 			if (DetJtWiJ == 0)
 			{
 				continue;
@@ -799,8 +801,10 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 			JtWiJiJt.Reset();
 			MatrixMultiply(
 				JtWiJiJt.Ptr(),
-				JtWiJi.Ptr(), AXIS_COUNT, AXIS_COUNT,
-				Jt.Ptr(), AXIS_COUNT, DisplacementCount
+				JtWiJi.Ptr(),
+				AXIS_COUNT, AXIS_COUNT,
+				Jt.Ptr(),
+				AXIS_COUNT, DisplacementCount
 			);
 
 			// ヤコビアン加重逆行列 (J^T * W^-1 * J)^-1 * J^T * W^-1
@@ -808,17 +812,122 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 			Jwp.Reset();
 			MatrixMultiply(
 				Jwp.Ptr(),
-				JtWiJiJt.Ptr(), AXIS_COUNT, DisplacementCount,
-				Wi.Ptr(), DisplacementCount, DisplacementCount
+				JtWiJiJt.Ptr(),
+				AXIS_COUNT, DisplacementCount,
+				Wi.Ptr(),
+				DisplacementCount, DisplacementCount
 			);
-#endif
+
 			// 関節角度ベクトル1 目標エフェクタ変位 * ヤコビアン加重逆行列
 			// auto Rt1 = FBuffer(BoneAxisCount);
+			Rt1.Reset();
+			for (int32 i = 0; i < BoneAxisCount; ++i)
+			{
+				Rt1.Ref(i) +=
+					EffectorStep[0] * Jwp.Ref(0, i)
+					+ EffectorStep[1] * Jwp.Ref(1, i)
+					+ EffectorStep[2] * Jwp.Ref(2, i)
+					+ EffectorStep[3] * Jwp.Ref(3, i);
+			}
 
-
-
-
+			// TODO:冗長変数イータを計算に入れたRt2の計算は枝葉なので後回し
+			// TODO:とりあえずRt2が必要なのでRt1と同じにしておく
+			Rt2.Reset();
+			Rt2 = Rt1;
 #if 0
+			// TODO;
+			// 冗長変数 Eta
+			// auto Eta = FBuffer(BoneAxisCount);
+			Eta.Reset();
+			if (EtaStep > 0.f)
+			{
+				for (int32 i = 0; i < BoneCount; ++i)
+				{
+					SCOPE_CYCLE_COUNTER(STAT_FullbodyIK_CulcEta);
+
+					int32 BoneIndex = BoneIndices[i];
+					auto& SolverInternal = SolverInternals[BoneIndex];
+
+					if (SolverInternal.bTranslation)
+					{
+						FVector CurrentLocation = GetLocalSpaceBoneLocation(BoneIndex);
+						FVector InputLocation = SolverInternal.InitLocalTransform.GetLocation();
+
+						auto CalcEta = [&](int32 Axis, float CurrentPosition, float InputPosition, const FFullbodyIKSolverAxis& SolverAxis)
+						{
+							CurrentPosition += Rt1.Ref(i * AXIS_COUNT + Axis);
+							float DeltaPosition = CurrentPosition - InputPosition;
+							if (!FMath::IsNearlyZero(DeltaPosition))
+							{
+								Eta.Ref(i * AXIS_COUNT + Axis) = GetMappedRangeEaseInClamped(
+									0, 90,
+									0, Setting->EtaSize * SolverAxis.EtaBias * EtaStep,
+									1.f, FMath::Abs(DeltaPosition)
+								) * (DeltaPosition > 0 ? -1 : 1);
+							}
+						};
+
+						CalcEta(0, CurrentLocation.X, InputLocation.X, SolverInternal.X);
+						CalcEta(1, CurrentLocation.Y, InputLocation.Y, SolverInternal.Y);
+						CalcEta(2, CurrentLocation.Z, InputLocation.Z, SolverInternal.Z);
+					}
+					else
+					{
+						FRotator CurrentRotation = GetLocalSpaceBoneRotation(BoneIndex).Rotator();
+						FRotator InputRotation = SolverInternal.InitLocalTransform.Rotator();
+
+						auto CalcEta = [&](int32 Axis, float CurrentAngle, float InputAngle, const FFullbodyIKSolverAxis& SolverAxis)
+						{
+							CurrentAngle += FMath::RadiansToDegrees(Rt1.Ref(i * AXIS_COUNT + Axis));
+							float DeltaAngle = FRotator::NormalizeAxis(CurrentAngle - InputAngle);
+							if (!FMath::IsNearlyZero(DeltaAngle))
+							{
+								Eta.Ref(i * AXIS_COUNT + Axis) = GetMappedRangeEaseInClamped(
+									0, 90,
+									0, Setting->EtaSize * SolverAxis.EtaBias * EtaStep,
+									1.f, FMath::Abs(DeltaAngle)
+								) * (DeltaAngle > 0 ? -1 : 1);
+							}
+						};
+
+						CalcEta(0, CurrentRotation.Roll, InputRotation.Roll, SolverInternal.X);
+						CalcEta(1, CurrentRotation.Pitch, InputRotation.Pitch, SolverInternal.Y);
+						CalcEta(2, CurrentRotation.Yaw, InputRotation.Yaw, SolverInternal.Z);
+					}
+				}
+			}
+
+			// Eta * J
+			// auto EtaJ = FBuffer(AXIS_COUNT);
+			EtaJ.Reset();
+			for (int32 i = 0; i < AXIS_COUNT; ++i)
+			{
+				for (int32 j = 0; j < BoneAxisCount; ++j)
+				{
+					EtaJ.Ref(i) += Eta.Ref(j) * J.Ref(j, i);
+				}
+			}
+
+			// Eta * J * J^+
+			// auto EtaJJp = FBuffer(BoneAxisCount);
+			EtaJJp.Reset();
+			for (int32 i = 0; i < BoneAxisCount; ++i)
+			{
+				for (int32 j = 0; j < AXIS_COUNT; ++j)
+				{
+					EtaJJp.Ref(i) += EtaJ.Ref(j) * Jp.Ref(j, i);
+				}
+			}
+
+			// 冗長項 Eta - Eta * J * J^+
+			// auto Rt2 = FBuffer(BoneAxisCount);
+			Rt2.Reset();
+			for (int32 i = 0; i < BoneAxisCount; ++i)
+			{
+				Rt2.Ref(i) = Eta.Ref(i) - EtaJJp.Ref(i);
+			}
+
+			// TODO:枝葉の部分なので実装は後回し
 			// Transform更新
 			SolveSolver(0, FTransform::Identity,
 				[&](int32 BoneIndex, FVector& SavedOffsetLocation, FVector& CurrentOffsetLocation)
