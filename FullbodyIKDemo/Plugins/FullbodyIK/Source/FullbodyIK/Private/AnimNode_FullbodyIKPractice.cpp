@@ -6,72 +6,71 @@
 #include "AnimInstanceInterface_FullbodyIK.h"
 #include "DrawDebugHelpers.h"
 
-#if 0
 namespace {
-static FORCEINLINE float SinDegree(float Degree) { return FMath::Sin(FMath::DegreesToRadians(Degree)); }
-static FORCEINLINE float CosDegree(float Degree) { return FMath::Cos(FMath::DegreesToRadians(Degree)); }
+FORCEINLINE float SinDegreePractice(float Degree) { return FMath::Sin(FMath::DegreesToRadians(Degree)); }
+FORCEINLINE float CosDegreePractice(float Degree) { return FMath::Cos(FMath::DegreesToRadians(Degree)); }
 
-static FORCEINLINE FMatrix RotX(float Roll)
+FORCEINLINE FMatrix RotXPractice(float Roll)
 {
 	return FMatrix(
 		FPlane(1, 0, 0, 0),
-		FPlane(0, CosDegree(Roll), -SinDegree(Roll), 0),
-		FPlane(0, SinDegree(Roll), CosDegree(Roll), 0),
+		FPlane(0, CosDegreePractice(Roll), -SinDegreePractice(Roll), 0),
+		FPlane(0, SinDegreePractice(Roll), CosDegreePractice(Roll), 0),
 		FPlane(0, 0, 0, 1)
 	);
 }
 
-static FORCEINLINE FMatrix RotY(float Pitch)
+FORCEINLINE FMatrix RotYPractice(float Pitch)
 {
 	return FMatrix(
-		FPlane(CosDegree(Pitch), 0, SinDegree(Pitch), 0),
+		FPlane(CosDegreePractice(Pitch), 0, SinDegreePractice(Pitch), 0),
 		FPlane(0, 1, 0, 0),
-		FPlane(-SinDegree(Pitch), 0, CosDegree(Pitch), 0),
+		FPlane(-SinDegreePractice(Pitch), 0, CosDegreePractice(Pitch), 0),
 		FPlane(0, 0, 0, 1)
 	);
 }
 
-static FORCEINLINE FMatrix RotZ(float Yaw)
+FORCEINLINE FMatrix RotZPractice(float Yaw)
 {
 	return FMatrix(
-		FPlane(CosDegree(Yaw), SinDegree(Yaw), 0, 0),
-		FPlane(-SinDegree(Yaw), CosDegree(Yaw), 0, 0),
+		FPlane(CosDegreePractice(Yaw), SinDegreePractice(Yaw), 0, 0),
+		FPlane(-SinDegreePractice(Yaw), CosDegreePractice(Yaw), 0, 0),
 		FPlane(0, 0, 1, 0),
 		FPlane(0, 0, 0, 1)
 	);
 }
 
-static FORCEINLINE FMatrix DiffRotX(float Roll)
+FORCEINLINE FMatrix DiffRotXPractice(float Roll)
 {
 	return FMatrix(
 		FPlane(0, 0, 0, 0),
-		FPlane(0, -SinDegree(Roll), -CosDegree(Roll), 0),
-		FPlane(0, CosDegree(Roll), -SinDegree(Roll), 0),
+		FPlane(0, -SinDegreePractice(Roll), -CosDegreePractice(Roll), 0),
+		FPlane(0, CosDegreePractice(Roll), -SinDegreePractice(Roll), 0),
 		FPlane(0, 0, 0, 0)
 	);
 }
 
-static FORCEINLINE FMatrix DiffRotY(float Pitch)
+FORCEINLINE FMatrix DiffRotYPractice(float Pitch)
 {
 	return FMatrix(
-		FPlane(-SinDegree(Pitch), 0, CosDegree(Pitch), 0),
+		FPlane(-SinDegreePractice(Pitch), 0, CosDegreePractice(Pitch), 0),
 		FPlane(0, 0, 0, 0),
-		FPlane(-CosDegree(Pitch), 0, -SinDegree(Pitch), 0),
+		FPlane(-CosDegreePractice(Pitch), 0, -SinDegreePractice(Pitch), 0),
 		FPlane(0, 0, 0, 0)
 	);
 }
 
-static FORCEINLINE FMatrix DiffRotZ(float Yaw)
+FORCEINLINE FMatrix DiffRotZPractice(float Yaw)
 {
 	return FMatrix(
-		FPlane(-SinDegree(Yaw), CosDegree(Yaw), 0, 0),
-		FPlane(-CosDegree(Yaw), -SinDegree(Yaw), 0, 0),
+		FPlane(-SinDegreePractice(Yaw), CosDegreePractice(Yaw), 0, 0),
+		FPlane(-CosDegreePractice(Yaw), -SinDegreePractice(Yaw), 0, 0),
 		FPlane(0, 0, 0, 0),
 		FPlane(0, 0, 0, 0)
 	);
 }
 
-static FORCEINLINE float MatrixInverse3(float* DstMatrix, const float* SrcMatrix)
+FORCEINLINE float MatrixInverse3Practice(float* DstMatrix, const float* SrcMatrix)
 {
 	float Det =
 		  SrcMatrix[0 * 3 + 0] * SrcMatrix[1 * 3 + 1] * SrcMatrix[2 * 3 + 2]
@@ -101,7 +100,7 @@ static FORCEINLINE float MatrixInverse3(float* DstMatrix, const float* SrcMatrix
 	return Det;
 }
 
-static FORCEINLINE float MatrixInverse4(float* DstMatrix, const float* SrcMatrix)
+FORCEINLINE float MatrixInverse4Practice(float* DstMatrix, const float* SrcMatrix)
 {
 	float Det =
 			SrcMatrix[0 * 4 + 0] * (
@@ -135,7 +134,7 @@ static FORCEINLINE float MatrixInverse4(float* DstMatrix, const float* SrcMatrix
 	return Det;
 }
 
-static FORCEINLINE void MatrixTranspose(float* DstMatrix, const float* SrcMatrix, const int32 Row, const int32 Col)
+FORCEINLINE void MatrixTransposePractice(float* DstMatrix, const float* SrcMatrix, const int32 Row, const int32 Col)
 {
 	for (int32 i = 0; i < Row; ++i)
 	{
@@ -146,7 +145,7 @@ static FORCEINLINE void MatrixTranspose(float* DstMatrix, const float* SrcMatrix
 	}
 }
 
-static FORCEINLINE void MatrixMultiply(float* DstMatrix, const float* SrcMatrix1, const int32 Row1, const int32 Col1, const float* SrcMatrix2, const int32 Row2, const int32 Col2)
+FORCEINLINE void MatrixMultiplyPractice(float* DstMatrix, const float* SrcMatrix1, const int32 Row1, const int32 Col1, const float* SrcMatrix2, const int32 Row2, const int32 Col2)
 {
 	check(Col1 == Row2);
 
@@ -165,7 +164,7 @@ static FORCEINLINE void MatrixMultiply(float* DstMatrix, const float* SrcMatrix1
 	}
 }
 
-static FORCEINLINE float MatrixDet(const float* SrcMatrix, const int32 N)
+FORCEINLINE float MatrixDetPractice(const float* SrcMatrix, const int32 N)
 {
 	float Det = 0;
 
@@ -187,7 +186,7 @@ static FORCEINLINE float MatrixDet(const float* SrcMatrix, const int32 N)
 	return Det;
 }
 
-static FORCEINLINE float GetMappedRangeEaseInClamped(
+FORCEINLINE float GetMappedRangeEaseInClampedPractice(
 	const float& InRangeMin,
 	const float& InRangeMax,
 	const float& OutRangeMin,
@@ -199,7 +198,6 @@ static FORCEINLINE float GetMappedRangeEaseInClamped(
 	return FMath::InterpEaseIn(OutRangeMin, OutRangeMax, Pct, Exp);
 }
 } // namespace
-#endif
 
 FAnimNode_FullbodyIKPractice::FAnimNode_FullbodyIKPractice()
 	: Setting(nullptr)
@@ -328,6 +326,7 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 		UE_LOG(LogTemp, Warning, TEXT("FAnimNode_FullbodyIK implements UAnimInstanceInterface_FullbodyIK."));
 		return;
 	}
+	// TODO:AnimInstanceがいつどこでUAnimInstanceInterface_FullbodyIKのインターフェースを実装したインスタンスになっているのかがよくわからん
 
 	USkeletalMeshComponent* Mesh = Context.AnimInstanceProxy->GetSkelMeshComponent();
 	if (Mesh == nullptr)
@@ -425,22 +424,21 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 	}
 
 	// Transform更新
-	// LocationOffset, RotationOffsetの現在のポーズへの反映
-#if 0
-	// TODO:枝葉の部分なので実装は後回し
+	// 前フレームまでに計算して保存しておいたLocationOffset、RotationOffsetをSolverInternal.LocalTransformとComponentTransformに入れる
 	SolveSolver(
-		0,
-		FTransform::Identity,
+		0, // ルートジョイントから再帰的に処理を行う
+		FTransform::Identity, // ルートジョイントなのでParentComponentTransformはIdentity
 		[&](int32 BoneIndex, FVector& SavedOffsetLocation, FVector& CurrentOffsetLocation)
 		{
 			CurrentOffsetLocation += SavedOffsetLocation;
 		},
-		[&](int32 BoneIndex, FVector& SavedOffsetRotation, FVector& CurrentOffsetRotation)
+		[&](int32 BoneIndex, FRotator& SavedOffsetRotation, FRotator& CurrentOffsetRotation)
 		{
 			CurrentOffsetRotation += SavedOffsetRotation;
 		}
 	);
 
+#if 0
 	// 重心の更新
 	UpdateCenterOfMass();
 #endif
@@ -722,12 +720,12 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 			// J^T
 			// auto Jt = FBuffer(AXIS_COUNT, DisplacementCount);
 			Jt.Reset();
-			MatrixTranspose(Jt.Ptr(), J.Ptr(), DisplacementCount, AXIS_COUNT);
+			MatrixTransposePractice(Jt.Ptr(), J.Ptr(), DisplacementCount, AXIS_COUNT);
 
 			// J^T * J
 			// auto JtJ = FBuffer(AXIS_COUNT, AXIS_COUNT);
 			JtJ.Reset();
-			MatrixMultiply(
+			MatrixMultiplyPractice(
 				JtJ.Ptr(),
 				Jt.Ptr(),
 				AXIS_COUNT, DisplacementCount,
@@ -738,7 +736,7 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 			// (J^T * J)^-1
 			// auto JtJi = FBuffer(AXIS_COUNT, AXIS_COUNT);
 			JtJi.Reset();
-			float DetJtJi = MatrixInverse3(JtJi.Ptr(), JtJ.Ptr());
+			float DetJtJi = MatrixInverse3Practice(JtJi.Ptr(), JtJ.Ptr());
 			if (DetJtJi == 0)
 			{
 				continue
@@ -748,7 +746,7 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 			// ヤコビアン擬似逆行列 (J^T * J)^-1 * J^T
 			// auto Jp = FBuffer(AXIS_COUNT, DisplacementCount);
 			Jp.Reset();
-			MatrixMultiply(
+			MatrixMultiplyPractice(
 				Jp.Ptr(),
 				JtJi.Ptr(),
 				AXIS_COUNT, AXIS_COUNT,
@@ -768,7 +766,7 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 			// J^T * W^-1
 			// auto JtWi = FBuffer(AXIS_COUNT, DisplacementCount);
 			JtWi.Reset();
-			MatrixMultiply(
+			MatrixMultiplyPractice(
 				JtWi.Ptr(),
 				Jt.Ptr(),
 				AXIS_COUNT, DisplacementCount,
@@ -779,7 +777,7 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 			// J^T * W^-1 * J
 			// auto JtWiJ = FBuffer(AXIS_COUNT, AXIS_COUNT);
 			JtWiJ.Reset();
-			MatrixMultiply(
+			MatrixMultiplyPractice(
 				JtWiJ.Ptr(),
 				JtWi.Ptr(),
 				AXIS_COUNT, DisplacementCount,
@@ -794,7 +792,7 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 			// (J^T * W^-1 * J)^-1
 			// auto JtWiJi = FBuffer(AXIS_COUNT, AXIS_COUNT);
 			JtWiJi.Reset();
-			float DetJtWiJ = MatrixInverse3(JtWiJi.Ptr(), JtWiJ.Ptr()); // TODO:なぜJtWiJの逆行列がJtWiJiなのか？
+			float DetJtWiJ = MatrixInverse3Practice(JtWiJi.Ptr(), JtWiJ.Ptr()); // TODO:なぜJtWiJの逆行列がJtWiJiなのか？
 			if (DetJtWiJ == 0)
 			{
 				continue;
@@ -803,7 +801,7 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 			// (J^T * W^-1 * J)^-1 * J^T
 			// auto JtWiJiJt = FBuffer(AXIS_COUNT, DisplacementCount);
 			JtWiJiJt.Reset();
-			MatrixMultiply(
+			MatrixMultiplyPractice(
 				JtWiJiJt.Ptr(),
 				JtWiJi.Ptr(),
 				AXIS_COUNT, AXIS_COUNT,
@@ -814,7 +812,7 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 			// ヤコビアン加重逆行列 (J^T * W^-1 * J)^-1 * J^T * W^-1
 			// auto Jwp = FBuffer(AXIS_COUNT, DisplacementCount);
 			Jwp.Reset();
-			MatrixMultiply(
+			MatrixMultiplyPractice(
 				Jwp.Ptr(),
 				JtWiJiJt.Ptr(),
 				AXIS_COUNT, DisplacementCount,
@@ -1101,9 +1099,9 @@ void FAnimNode_FullbodyIKPractice::CalcJacobian(const FEffectorInternal& Effecto
 			FRotator BoneRotation = GetLocalSpaceBoneRotation(BoneIndex).Rotator();
 			FMatrix DMat[AXIS_COUNT];
 
-			DMat[0] = DiffX(BoneRotation.Roll) * RotY(BoneRotation.Pitch) * RotZ(BoneRotation.Yaw);
-			DMat[1] = RotX(BoneRotation.Roll) * DiffY(BoneRotation.Pitch) * RotZ(BoneRotation.Yaw);
-			DMat[2] = RotX(BoneRotation.Roll) * RotY(BoneRotation.Pitch) * DiffZ(BoneRotation.Yaw);
+			DMat[0] = DiffRotXPractice(BoneRotation.Roll) * RotYPractice(BoneRotation.Pitch) * RotZPractice(BoneRotation.Yaw);
+			DMat[1] = RotXPractice(BoneRotation.Roll) * DiffRotYPractice(BoneRotation.Pitch) * RotZPractice(BoneRotation.Yaw);
+			DMat[2] = RotXPractice(BoneRotation.Roll) * RotYPractice(BoneRotation.Pitch) * DiffRotZPractice(BoneRotation.Yaw);
 
 			for (int32 Axis = 0; Axis < AXIS_COUNT; ++Axis)
 			{
@@ -1129,22 +1127,140 @@ void FAnimNode_FullbodyIKPractice::CalcJacobian(const FEffectorInternal& Effecto
 	}
 }
 
-#if 0
 void FAnimNode_FullbodyIKPractice::SolveSolver(
 	int32 BoneIndex,
 	const FTransform& ParentComponentTransform,
 	const TFunction<void(int32, FVector&, FVector&)>& LocationOffsetProcess,
 	const TFunction<void(int32, FRotator&, FRotator&)>& RotationOffsetProcess)
 {
+	// 最終的にはFSolverInternal.ComponentTransformを設定するのが目標。その結果をSolveSolverを呼び出した側が使う
+	// 毎回呼び出されるたびにFSolverInternalにIK計算結果を保持しておき、次の計算に使う
+	// BoneIndexで指定したジョイントの子孫にあたるSolverTreeのジョイントすべてにたいして再帰的に同様のIK計算を行う（深度優先の再帰になる）
+	// よって通常はBoneIndexにはルートにあたるジョイントのみ指定して呼び出せばよい
+	// まさにIKの反復計算のための関数である
+	// IK計算するための関数は外からTFunctionで与えられるようにしてあり、完全にその関数次第である
+	// IK計算以外にも、IKに関与するジョイント全体に同じ処理を行う場合に用いている
 	FSolverInternal& SolverInternal = SolverInternals[BoneIndex];
 
 	if (SolverInternal.bTranslation)
 	{
+		// 前回、SolveSolverの計算結果として保持したLocationOffset(Translateのオフセット)。初期値は0である
 		FVector SavedOffsetLocation = IAnimInstanceInterface_FullbodyIK::Execute_GetBoneLocationOffset(CachedAnimInstanceObject, BoneIndex);
+		// Evaluateの先頭で取得したローカルのTlanslate
 		FVector CurrentOffsetLocation = SolverInternal.LocalTransform.GetLocation();
+
+		LocationOffsetProcess(BoneIndex, SavedOffsetLocation, CurrentOffsetLocation);
+
+		// IK計算後に、関節の可動域のMax/MinによるClamp処理。超過した差分をマイナスする。
+		if (SolverInternal.bLimited)
+		{
+			if (CurrentOffsetLocation.X < SolverInternal.X.LimitMin)
+			{
+				float Offset = SolverInternal.X.LimitMin - CurrentOffsetLocation.X;
+				CurrentOffsetLocation.X += Offset;
+				SavedOffsetLocation.X += Offset;
+			}
+			else if (CurrentOffsetLocation.X > SolverInternal.X.LimitMax)
+			{
+				float Offset = SolverInternal.X.LimitMax - CurrentOffsetLocation.X;
+				CurrentOffsetLocation.X += Offset;
+				SavedOffsetLocation.X += Offset;
+			}
+
+			if (CurrentOffsetLocation.Y < SolverInternal.Y.LimitMin)
+			{
+				float Offset = SolverInternal.Y.LimitMin - CurrentOffsetLocation.Y;
+				CurrentOffsetLocation.Y += Offset;
+				SavedOffsetLocation.Y += Offset;
+			}
+			else if (CurrentOffsetLocation.Y > SolverInternal.Y.LimitMax)
+			{
+				float Offset = SolverInternal.Y.LimitMax - CurrentOffsetLocation.Y;
+				CurrentOffsetLocation.Y += Offset;
+				SavedOffsetLocation.Y += Offset;
+			}
+
+			if (CurrentOffsetLocation.Z < SolverInternal.Z.LimitMin)
+			{
+				float Offset = SolverInternal.Z.LimitMin - CurrentOffsetLocation.Z;
+				CurrentOffsetLocation.Z += Offset;
+				SavedOffsetLocation.Z += Offset;
+			}
+			else if (CurrentOffsetLocation.Z > SolverInternal.Z.LimitMax)
+			{
+				float Offset = SolverInternal.Z.LimitMax - CurrentOffsetLocation.Z;
+				CurrentOffsetLocation.Z += Offset;
+				SavedOffsetLocation.Z += Offset;
+			}
+		}
+
+		IAnimInstanceInterface_FullbodyIK::Execute_SetBoneLocationOffset(CachedAnimInstanceObject, BoneIndex, SavedOffsetLocation);
+		SolverInternal.LocalTransform.SetLocation(CurrentOffsetLocation);
 	}
 	else
 	{
+		// 前回、SolveSolverの計算結果として保持したRotationOffset。初期値は0である
+		FRotator SavedOffsetRotation = IAnimInstanceInterface_FullbodyIK::Execute_GetBoneRotationOffset(CachedAnimInstanceObject, BoneIndex);
+		// Evaluateの先頭で取得したローカルのRotate
+		FRotator CurrentOffsetRotation = SolverInternal.LocalTransform.Rotator();
+
+		RotationOffsetProcess(BoneIndex, SavedOffsetRotation, CurrentOffsetRotation);
+
+		if (SolverInternal.bLimited)
+		{
+			if (CurrentOffsetRotation.Roll < SolverInternal.X.LimitMin)
+			{
+				float Offset = SolverInternal.X.LimitMin - CurrentOffsetRotation.Roll;
+				CurrentOffsetRotation.Roll += Offset;
+				SavedOffsetRotation.Roll += Offset;
+			}
+			else if (CurrentOffsetRotation.Roll > SolverInternal.X.LimitMax)
+			{
+				float Offset = SolverInternal.X.LimitMax - CurrentOffsetRotation.Roll;
+				CurrentOffsetRotation.Roll += Offset;
+				SavedOffsetRotation.Roll += Offset;
+			}
+
+			if (CurrentOffsetRotation.Pitch < SolverInternal.Y.LimitMin)
+			{
+				float Offset = SolverInternal.Y.LimitMin - CurrentOffsetRotation.Pitch;
+				CurrentOffsetRotation.Pitch += Offset;
+				SavedOffsetRotation.Pitch += Offset;
+			}
+			else if (CurrentOffsetRotation.Pitch > SolverInternal.Y.LimitMax)
+			{
+				float Offset = SolverInternal.Y.LimitMax - CurrentOffsetRotation.Pitch;
+				CurrentOffsetRotation.Pitch += Offset;
+				SavedOffsetRotation.Pitch += Offset;
+			}
+
+			if (CurrentOffsetRotation.Yaw < SolverInternal.Z.LimitMin)
+			{
+				float Offset = SolverInternal.Z.LimitMin - CurrentOffsetRotation.Yaw;
+				CurrentOffsetRotation.Yaw += Offset;
+				SavedOffsetRotation.Yaw += Offset;
+			}
+			else if (CurrentOffsetRotation.Yaw > SolverInternal.Z.LimitMax)
+			{
+				float Offset = SolverInternal.Z.LimitMax - CurrentOffsetRotation.Yaw;
+				CurrentOffsetRotation.Yaw += Offset;
+				SavedOffsetRotation.Yaw += Offset;
+			}
+		}
+
+		IAnimInstanceInterface_FullbodyIK::Execute_SetBoneRotationOffset(CachedAnimInstanceObject, BoneIndex, SavedOffsetRotation);
+		SolverInternal.LocalTransform.SetRotation(FQuat(CurrentOffsetRotation));
+	}
+
+	// 最終的に計算したかったもの
+	SolverInternal.ComponentTransform = SolverInternal.LocalTransform * ParentComponentTransform;
+
+	// 子孫にも、IKに関与するジョイントには再帰的に同じ処理をやる
+	if (SolverTree.Contains(BoneIndex))
+	{
+		for (int32 ChildBoneIndex : SolverTree[BoneIndex])
+		{
+			SolveSolver(ChildBoneIndex, SolverInternal.ComponentTransform, LocationOffsetProcess, RotationOffsetProcess);
+		}
 	}
 }
-#endif

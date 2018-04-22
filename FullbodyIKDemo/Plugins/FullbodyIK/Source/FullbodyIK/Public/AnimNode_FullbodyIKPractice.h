@@ -199,13 +199,11 @@ private:
 
 	void CalcJacobian(const FEffectorInternal& EffectorInternal, float* Jacobian);
 
-#if 0
 	void SolveSolver(
 		int32 BoneIndex,
 		const FTransform& ParentComponentTransform,
 		const TFunction<void(int32, FVector&, FVector&)>& LocationOffsetProcess,
 		const TFunction<void(int32, FRotator&, FRotator&)>& RotationOffsetProcess);
-#endif
 
 	static const int32 AXIS_COUNT = 3;
 
