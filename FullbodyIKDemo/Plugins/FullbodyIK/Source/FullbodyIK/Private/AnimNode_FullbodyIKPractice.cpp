@@ -6,11 +6,12 @@
 #include "AnimInstanceInterface_FullbodyIK.h"
 #include "DrawDebugHelpers.h"
 
+#if 0
 namespace {
-FORCEINLINE float SinDegree(float Degree) { return FMath::Sin(FMath::DegreesToRadians(Degree)); }
-FORCEINLINE float CosDegree(float Degree) { return FMath::Cos(FMath::DegreesToRadians(Degree)); }
+static FORCEINLINE float SinDegree(float Degree) { return FMath::Sin(FMath::DegreesToRadians(Degree)); }
+static FORCEINLINE float CosDegree(float Degree) { return FMath::Cos(FMath::DegreesToRadians(Degree)); }
 
-FORCEINLINE FMatrix RotX(float Roll)
+static FORCEINLINE FMatrix RotX(float Roll)
 {
 	return FMatrix(
 		FPlane(1, 0, 0, 0),
@@ -20,7 +21,7 @@ FORCEINLINE FMatrix RotX(float Roll)
 	);
 }
 
-FORCEINLINE FMatrix RotY(float Pitch)
+static FORCEINLINE FMatrix RotY(float Pitch)
 {
 	return FMatrix(
 		FPlane(CosDegree(Pitch), 0, SinDegree(Pitch), 0),
@@ -30,7 +31,7 @@ FORCEINLINE FMatrix RotY(float Pitch)
 	);
 }
 
-FORCEINLINE FMatrix RotZ(float Yaw)
+static FORCEINLINE FMatrix RotZ(float Yaw)
 {
 	return FMatrix(
 		FPlane(CosDegree(Yaw), SinDegree(Yaw), 0, 0),
@@ -40,7 +41,7 @@ FORCEINLINE FMatrix RotZ(float Yaw)
 	);
 }
 
-FORCEINLINE FMatrix DiffRotX(float Roll)
+static FORCEINLINE FMatrix DiffRotX(float Roll)
 {
 	return FMatrix(
 		FPlane(0, 0, 0, 0),
@@ -50,7 +51,7 @@ FORCEINLINE FMatrix DiffRotX(float Roll)
 	);
 }
 
-FORCEINLINE FMatrix DiffRotY(float Pitch)
+static FORCEINLINE FMatrix DiffRotY(float Pitch)
 {
 	return FMatrix(
 		FPlane(-SinDegree(Pitch), 0, CosDegree(Pitch), 0),
@@ -60,7 +61,7 @@ FORCEINLINE FMatrix DiffRotY(float Pitch)
 	);
 }
 
-FORCEINLINE FMatrix DiffRotZ(float Yaw)
+static FORCEINLINE FMatrix DiffRotZ(float Yaw)
 {
 	return FMatrix(
 		FPlane(-SinDegree(Yaw), CosDegree(Yaw), 0, 0),
@@ -70,7 +71,7 @@ FORCEINLINE FMatrix DiffRotZ(float Yaw)
 	);
 }
 
-FORCEINLINE float MatrixInverse3(float* DstMatrix, const float* SrcMatrix)
+static FORCEINLINE float MatrixInverse3(float* DstMatrix, const float* SrcMatrix)
 {
 	float Det =
 		  SrcMatrix[0 * 3 + 0] * SrcMatrix[1 * 3 + 1] * SrcMatrix[2 * 3 + 2]
@@ -100,7 +101,7 @@ FORCEINLINE float MatrixInverse3(float* DstMatrix, const float* SrcMatrix)
 	return Det;
 }
 
-FORCEINLINE float MatrixInverse4(float* DstMatrix, const float* SrcMatrix)
+static FORCEINLINE float MatrixInverse4(float* DstMatrix, const float* SrcMatrix)
 {
 	float Det =
 			SrcMatrix[0 * 4 + 0] * (
@@ -134,7 +135,7 @@ FORCEINLINE float MatrixInverse4(float* DstMatrix, const float* SrcMatrix)
 	return Det;
 }
 
-FORCEINLINE void MatrixTranspose(float* DstMatrix, const float* SrcMatrix, const int32 Row, const int32 Col)
+static FORCEINLINE void MatrixTranspose(float* DstMatrix, const float* SrcMatrix, const int32 Row, const int32 Col)
 {
 	for (int32 i = 0; i < Row; ++i)
 	{
@@ -145,7 +146,7 @@ FORCEINLINE void MatrixTranspose(float* DstMatrix, const float* SrcMatrix, const
 	}
 }
 
-FORCEINLINE void MatrixMultiply(float* DstMatrix, const float* SrcMatrix1, const int32 Row1, const int32 Col1, const float* SrcMatrix2, const int32 Row2, const int32 Col2)
+static FORCEINLINE void MatrixMultiply(float* DstMatrix, const float* SrcMatrix1, const int32 Row1, const int32 Col1, const float* SrcMatrix2, const int32 Row2, const int32 Col2)
 {
 	check(Col1 == Row2);
 
@@ -164,7 +165,7 @@ FORCEINLINE void MatrixMultiply(float* DstMatrix, const float* SrcMatrix1, const
 	}
 }
 
-FORCEINLINE float MatrixDet(const float* SrcMatrix, const int32 N)
+static FORCEINLINE float MatrixDet(const float* SrcMatrix, const int32 N)
 {
 	float Det = 0;
 
@@ -186,7 +187,7 @@ FORCEINLINE float MatrixDet(const float* SrcMatrix, const int32 N)
 	return Det;
 }
 
-FORCEINLINE float GetMappedRangeEaseInClamped(
+static FORCEINLINE float GetMappedRangeEaseInClamped(
 	const float& InRangeMin,
 	const float& InRangeMax,
 	const float& OutRangeMin,
@@ -198,6 +199,7 @@ FORCEINLINE float GetMappedRangeEaseInClamped(
 	return FMath::InterpEaseIn(OutRangeMin, OutRangeMax, Pct, Exp);
 }
 } // namespace
+#endif
 
 FAnimNode_FullbodyIKPractice::FAnimNode_FullbodyIKPractice()
 	: Setting(nullptr)
@@ -299,7 +301,7 @@ void FAnimNode_FullbodyIKPractice::Initialize_AnyThread(const FAnimationInitiali
 	ElementsRt2.SetNumZeroed(BoneAxisCount);
 
 	// 加重行列 W
-	FBuffer& W0 = FBuffer(ElementsW0.GetData(), BoneAxisCount);
+	FBuffer W0 = FBuffer(ElementsW0.GetData(), BoneAxisCount);
 	for (int32 i = 0; i < BoneCount; ++i)
 	{
 		int32 BoneIndex = BoneIndices[i];
@@ -318,8 +320,9 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 		return;
 	}
 
+	// AnimInstanceFullbodyIKをとってくる。IAnimInstanceInterface_FullbodyIKで扱うのでUObjectで取得する
 	UObject* AnimInstanceObject = Context.AnimInstanceProxy->GetAnimInstanceObject();
-	// TODO:UAnimInstanceInterface_FullbodyIKについては後で調べて写経しよう　UInterfaceの動きは独特だ
+	// これはImplementsするわけではなく、Implementしているかを判定する処理。isImplementingInterfaceがふさわしい
 	if (!AnimInstanceObject->GetClass()->ImplementsInterface(UAnimInstanceInterface_FullbodyIK::StaticClass()))
 	{
 		UE_LOG(LogTemp, Warning, TEXT("FAnimNode_FullbodyIK implements UAnimInstanceInterface_FullbodyIK."));
@@ -409,6 +412,7 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 
 	for (int32 BoneIndex : BoneIndices)
 	{
+		// AnimInstanceFullbodyIK.cppでUAnimInstanceFullbodyIK::InitializeBoneOffset_Implementationで実装している
 		IAnimInstanceInterface_FullbodyIK::Execute_InitializeBoneOffset(AnimInstanceObject, BoneIndex);
 
 		// 初期Transformを保存
@@ -680,23 +684,23 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 
 			EtaStep /= Setting->StepSize;
 
-			FBuffer& J = FBuffer(ElementsJ.GetData(), DisplacementCount, AXIS_COUNT);
-			FBuffer& Jt = FBuffer(ElementsJt.GetData(), AXIS_COUNT, DisplacementCount);
-			FBuffer& JtJ = FBuffer(ElementsJtJ.GetData(), AXIS_COUNT, AXIS_COUNT);
-			FBuffer& JtJi = FBuffer(ElementsJtJi.GetData(), AXIS_COUNT, AXIS_COUNT);
-			FBuffer& Jp = FBuffer(ElementsJp.GetData(), AXIS_COUNT, DisplacementCount);
-			FBuffer& W0 = FBuffer(ElementsW0.GetData(), BoneAxisCount);
-			FBuffer& Wi = FBuffer(ElementsWi.GetData(), DisplacementCount, DisplacementCount);
-			FBuffer& JtWi = FBuffer(ElementsJtWi.GetData(), AXIS_COUNT, DisplacementCount);
-			FBuffer& JtWiJ = FBuffer(ElementsJtWiJ.GetData(), AXIS_COUNT, AXIS_COUNT);
-			FBuffer& JtWiJi = FBuffer(ElementsJtWiJi.GetData(), AXIS_COUNT, AXIS_COUNT);
-			FBuffer& JtWiJiJt = FBuffer(ElementsJtWiJiJt.GetData(), AXIS_COUNT, DisplacementCount);
-			FBuffer& Jwp = FBuffer(ElementsJwp.GetData(), AXIS_COUNT, DisplacementCount);
-			FBuffer& Rt1 = FBuffer(ElementsRt1.GetData(), BoneAxisCount);
-			FBuffer& Eta = FBuffer(ElementsEta.GetData(), BoneAxisCount);
-			FBuffer& EtaJ = FBuffer(ElementsEtaJ.GetData(), AXIS_COUNT);
-			FBuffer& EtaJJp = FBuffer(ElementsEtaJJp.GetData(), BoneAxisCount);
-			FBuffer& Rt2 = FBuffer(ElementsRt2.GetData(), BoneAxisCount);
+			FBuffer J = FBuffer(ElementsJ.GetData(), DisplacementCount, AXIS_COUNT);
+			FBuffer Jt = FBuffer(ElementsJt.GetData(), AXIS_COUNT, DisplacementCount);
+			FBuffer JtJ = FBuffer(ElementsJtJ.GetData(), AXIS_COUNT, AXIS_COUNT);
+			FBuffer JtJi = FBuffer(ElementsJtJi.GetData(), AXIS_COUNT, AXIS_COUNT);
+			FBuffer Jp = FBuffer(ElementsJp.GetData(), AXIS_COUNT, DisplacementCount);
+			FBuffer W0 = FBuffer(ElementsW0.GetData(), BoneAxisCount);
+			FBuffer Wi = FBuffer(ElementsWi.GetData(), DisplacementCount, DisplacementCount);
+			FBuffer JtWi = FBuffer(ElementsJtWi.GetData(), AXIS_COUNT, DisplacementCount);
+			FBuffer JtWiJ = FBuffer(ElementsJtWiJ.GetData(), AXIS_COUNT, AXIS_COUNT);
+			FBuffer JtWiJi = FBuffer(ElementsJtWiJi.GetData(), AXIS_COUNT, AXIS_COUNT);
+			FBuffer JtWiJiJt = FBuffer(ElementsJtWiJiJt.GetData(), AXIS_COUNT, DisplacementCount);
+			FBuffer Jwp = FBuffer(ElementsJwp.GetData(), AXIS_COUNT, DisplacementCount);
+			FBuffer Rt1 = FBuffer(ElementsRt1.GetData(), BoneAxisCount);
+			FBuffer Eta = FBuffer(ElementsEta.GetData(), BoneAxisCount);
+			FBuffer EtaJ = FBuffer(ElementsEtaJ.GetData(), AXIS_COUNT);
+			FBuffer EtaJJp = FBuffer(ElementsEtaJJp.GetData(), BoneAxisCount);
+			FBuffer Rt2 = FBuffer(ElementsRt2.GetData(), BoneAxisCount);
 
 			// ヤコビアン J
 			// auto J = FBuffer(DisplacementCount, AXIS_COUNT);
@@ -926,8 +930,9 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 			{
 				Rt2.Ref(i) = Eta.Ref(i) - EtaJJp.Ref(i);
 			}
+#endif
 
-			// TODO:枝葉の部分なので実装は後回し
+#if 0
 			// Transform更新
 			SolveSolver(0, FTransform::Identity,
 				[&](int32 BoneIndex, FVector& SavedOffsetLocation, FVector& CurrentOffsetLocation)
@@ -1096,9 +1101,9 @@ void FAnimNode_FullbodyIKPractice::CalcJacobian(const FEffectorInternal& Effecto
 			FRotator BoneRotation = GetLocalSpaceBoneRotation(BoneIndex).Rotator();
 			FMatrix DMat[AXIS_COUNT];
 
-			DMat[0] = DiffRotX(BoneRotation.Roll) * RotY(BoneRotation.Pitch) * RotZ(BoneRotation.Yaw);
-			DMat[1] = RotX(BoneRotation.Roll) * DiffRotY(BoneRotation.Pitch) * RotZ(BoneRotation.Yaw);
-			DMat[2] = RotX(BoneRotation.Roll) * RotY(BoneRotation.Pitch) * DiffRotZ(BoneRotation.Yaw);
+			DMat[0] = DiffX(BoneRotation.Roll) * RotY(BoneRotation.Pitch) * RotZ(BoneRotation.Yaw);
+			DMat[1] = RotX(BoneRotation.Roll) * DiffY(BoneRotation.Pitch) * RotZ(BoneRotation.Yaw);
+			DMat[2] = RotX(BoneRotation.Roll) * RotY(BoneRotation.Pitch) * DiffZ(BoneRotation.Yaw);
 
 			for (int32 Axis = 0; Axis < AXIS_COUNT; ++Axis)
 			{
@@ -1115,7 +1120,7 @@ void FAnimNode_FullbodyIKPractice::CalcJacobian(const FEffectorInternal& Effecto
 			}
 		}
 
-		if (BoneIndex = EffectorInternal.RootBoneIndex || ParentBoneIndex == INDEX_NONE)
+		if (BoneIndex == EffectorInternal.RootBoneIndex || ParentBoneIndex == INDEX_NONE)
 		{
 			break;
 		}
