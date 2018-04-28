@@ -417,6 +417,7 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 		// 初期Transformを保存
 		const FCompactPoseBoneIndex& CompactPoseBoneIndex = FCompactPoseBoneIndex(BoneIndex);
 		FSolverInternal& SolverInternal = SolverInternals[BoneIndex];
+		// Context.Poseでバインドポーズをとってきて初期化
 		SolverInternal.LocalTransform = Context.Pose.GetLocalSpaceTransform(CompactPoseBoneIndex);
 		SolverInternal.ComponentTransform = Context.Pose.GetComponentSpaceTransform(CompactPoseBoneIndex);
 		SolverInternal.InitLocalTransform = SolverInternal.LocalTransform;
@@ -424,17 +425,22 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 	}
 
 	// Transform更新
-	// 前フレームまでに計算して保存しておいたLocationOffset、RotationOffsetをSolverInternal.LocalTransformとComponentTransformに入れる
+	// IKに関わる全ジョイントで前フレームまでに計算して保存しておいたLocationOffset、RotationOffsetを
+	// SolverInternal.LocalTransform、ComponentTransform（上でバインドポーズで初期化した）に加算する
+	// SolverInternal.LocalTransform、ComponentTransformに前フレームの計算結果を入れるのはEvaluateの中でここのみである
+	// 
 	SolveSolver(
 		0, // ルートジョイントから再帰的に処理を行う
 		FTransform::Identity, // ルートジョイントなのでParentComponentTransformはIdentity
-		[&](int32 BoneIndex, FVector& SavedOffsetLocation, FVector& CurrentOffsetLocation)
+		// ほげたつさんのソースでは引数名がわかりにくかったので修正した
+		// 第二引数はオフセット値であり、第三引数はオフセットを加算したLocation/Rotationの値である
+		[&](int32 BoneIndex, FVector& SavedLocationOffset, FVector& CurrentOffsetedLocation)
 		{
-			CurrentOffsetLocation += SavedOffsetLocation;
+			CurrentOffsetedLocation += SavedLocationOffset;
 		},
-		[&](int32 BoneIndex, FRotator& SavedOffsetRotation, FRotator& CurrentOffsetRotation)
+		[&](int32 BoneIndex, FRotator& SavedRotationOffset, FRotator& CurrentOffsetedRotation)
 		{
-			CurrentOffsetRotation += SavedOffsetRotation;
+			CurrentOffsetedRotation += SavedRotationOffset;
 		}
 	);
 
@@ -443,11 +449,12 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 	UpdateCenterOfMass();
 #endif
 
-	int32 StepLoopCount = 0; // 反復計算をするので、ループの最大数の定義は必要
+	// 反復計算をするので、ループの最大数の定義は必要。それがStepLoopCountとStepLoopCountMax
+	int32 StepLoopCount = 0;
 	// 反復のステップ数制限だけだとエフェクタが多ければステップ数上限を超えなくても計算回数は増えるので
-	// 実際にポーズを計算した回数にも制限をもうける
+	// 実際にポーズを計算した回数にも制限をもうける。それがEffectiveCountとEffectorCountMax
 	int32 EffectiveCount = 0;
-	while (Setting->StepLoopCountMax > 0 && Setting->EffectiveCountMax && StepLoopCount < Setting->StepLoopCountMax)
+	while (Setting->StepLoopCountMax > 0 && Setting->EffectiveCountMax > 0 && StepLoopCount < Setting->StepLoopCountMax)
 	{
 		for (int32 EffectorIndex = 0; EffectorIndex < EffectorCount; ++EffectorIndex)
 		{
@@ -468,8 +475,10 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 					FVector DeltaLocation = Effector.Location - EndSolverLocation;
 					float DeltaLocationSize = DeltaLocation.Size();
 
-					if (DeltaLocationSize > Setting->ConvergenceDistance) // TODO:なんじゃこれ？
+					if (DeltaLocationSize > Setting->ConvergenceDistance)
 					{
+						// Setting->ConvergenceDistanceはたぶん、実際にエフェクタの移動をさせる最小差分量だろう。
+						// あまりに移動させる長さが短ければそのフレームは移動をさせない。十分移動量が大きくなってから移動させるのだろう。
 						float Step = FMath::Min(Setting->StepSize, DeltaLocationSize);
 						EtaStep += Step;
 						FVector StepV = DeltaLocation / DeltaLocationSize * Step;
@@ -485,33 +494,33 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 				{
 					const FSolverInternal& SolverInternal = SolverInternals[Effector.EffectorBoneIndex];
 
-#if 0
-					// Transform更新 // TODO:このSolveSolverが何をしてるかをまだわかってないな。。。
 					SolveSolver(
 						0,
 						FTransform::Identity,
-						[&](int32 BoneIndex, FVector& SavedOffsetLocation, FVector& CurrentOffsetLocation)
+						[&](int32 BoneIndex, FVector& SavedLocationOffset, FVector& CurrentOffsetedLocation)
 						{
+							// Translationに対してはなにもしない
 						},
-						[&](int32 BoneIndex, FRotator& SavedOffsetRotation, FRotator& CurrentOffsetRotation)
+						[&](int32 BoneIndex, FRotator& SavedRotationOffset, FRotator& CurrentOffsetedRotation)
 						{
 							if (BoneIndex != Effector.EffectorBoneIndex)
 							{
 								return;
 							}
 
+							// Translationと違ってRotationの方はステップを踏んで少しずつ近づけることはせず一気に目標の向きに修正する
 							FTransform EffectorWorldTransform = FTransform(Effector.Rotation);
-							FTransform EffectorComponentTransform = EffectorWorldTransform * CachedComponentTransform.Inverse();
-							FTransform EffectorLocalTransform = EffectorComponentTransform * SolverInternals[SolverInternal.ParentBoneIndex].ComponentTransform.Inverse();
+							FTransform EffectorComponentTransform = EffectorWorldTransform * CachedComponentTransform.Inverse(); // TODO:ん？これあってる？
+							FTransform EffectorLocalTransform = EffectorComponentTransform * SolverInternals[SolverInternal.ParentBoneIndex].ComponentTransform.Inverse(); // TODO:これも。逆行列を右からかける意味ってなんだっけ？
 
 							FRotator EffectorLocalRotation = EffectorLocalTransform.Rotator();
-							FRotator DeltaLocalRotation = EffectorLocalRotation - CurrentOffsetRotation;
+							FRotator DeltaLocalRotation = EffectorLocalRotation - CurrentOffsetedRotation;
 
-							SavedOffsetRotation += DeltaLocalRotation;
-							CurrentOffsetRotation += DeltaLocalRotation;
+							SavedRotationOffset += DeltaLocalRotation;
+							CurrentOffsetedRotation += DeltaLocalRotation;
 						}
 					);
-#endif
+
 					DisplacementCount = BoneAxisCount;
 				}
 				break;
@@ -519,40 +528,44 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 				{
 					const FSolverInternal& SolverInternal = SolverInternals[Effector.EffectorBoneIndex];
 
-#if 0
 					// KeepRotation側にあたる処理
 					// Transform更新
-					SolveSolver(0, FTransform::Identity,
-						[&](int32 BoneIndex, FVector& SavedOffsetLocation, FVector& CurrentOffsetLocation)
+					SolveSolver(
+						0,
+						FTransform::Identity,
+						[&](int32 BoneIndex, FVector& SavedLocationOffset, FVector& CurrentOffsetedLocation)
 						{
+							// Translationに対してはなにもしない
 						},
-						[&](int32 BoneIndex, FRotator& SavedOffsetRotation, FRotator& CurrentOffsetRotation)
+						[&](int32 BoneIndex, FRotator& SavedRotationOffset, FRotator& CurrentOffsetedRotation)
 						{
 							if (BoneIndex != Effector.EffectorBoneIndex)
 							{
 								return;
 							}
 
+							// Translationと違ってRotationの方はステップを踏んで少しずつ近づけることはせず一気に目標の向きに修正する
 							FTransform EffectorWorldTransform = FTransform(Effector.Rotation);
-							FTransform EffectorComponentTransform = EffectorWorldTransform * CachedComponentTransform.Inverse();
-							FTransform EffectorLocalTransform = EffectorComponentTransform * SolverInternals[SolverInternal.ParentBoneIndex].ComponentTransform.Inverse();
+							FTransform EffectorComponentTransform = EffectorWorldTransform * CachedComponentTransform.Inverse(); // TODO:ん？これあってる？
+							FTransform EffectorLocalTransform = EffectorComponentTransform * SolverInternals[SolverInternal.ParentBoneIndex].ComponentTransform.Inverse(); // TODO:これも。逆行列を右からかける意味ってなんだっけ？
 
 							FRotator EffectorLocalRotation = EffectorLocalTransform.Rotator();
-							FRotator DeltaLocalRotation = EffectorLocalRotation - CurrentOffsetRotation;
+							FRotator DeltaLocalRotation = EffectorLocalRotation - CurrentOffsetedRotation;
 
-							SavedOffsetRotation += DeltaLocalRotation;
-							CurrentOffsetRotation += DeltaLocalRotation;
+							SavedRotationOffset += DeltaLocalRotation;
+							CurrentOffsetedRotation += DeltaLocalRotation;
 						}
 					);
-#endif
 
 					// KeepLocation側にあたる処理
 					FVector EndSolverLocation = GetWorldSpaceBoneLocation(Effector.EffectorBoneIndex);
 					FVector DeltaLocation = Effector.Location - EndSolverLocation;
 					float DeltaLocationSize = DeltaLocation.Size();
 
-					if (DeltaLocationSize > Setting->ConvergenceDistance) // TODO:なんじゃこれ？
+					if (DeltaLocationSize > Setting->ConvergenceDistance)
 					{
+						// Setting->ConvergenceDistanceはたぶん、実際にエフェクタの移動をさせる最小差分量だろう。
+						// あまりに移動させる長さが短ければそのフレームは移動をさせない。十分移動量が大きくなってから移動させるのだろう。
 						float Step = FMath::Min(Setting->StepSize, DeltaLocationSize);
 						EtaStep += Step;
 						FVector StepV = DeltaLocation / DeltaLocationSize * Step;
@@ -564,6 +577,7 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 					DisplacementCount = BoneAxisCount;
 				}
 				break;
+			// TODO:Followってのが何をやりたいのかまだ理解してない
 			case EFullbodyIkEffectorTypePractice::FollowOriginalLocation:
 				{
 					const FSolverInternal& SolverInternal = SolverInternals[Effector.EffectorBoneIndex];
@@ -573,7 +587,7 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 					FVector DeltaLocation = InitWorldTransform.GetLocation() + CachedComponentTransform.TransformVector(Effector.Location) - EndSolverLocation; // TODO:なぜこれが目標位置への差分になるのか？
 					float DeltaLocationSize = DeltaLocation.Size();
 
-					if (DeltaLocationSize > Setting->ConvergenceDistance) // TODO:なんじゃこれ？
+					if (DeltaLocationSize > Setting->ConvergenceDistance)
 					{
 						float Step = FMath::Min(Setting->StepSize, DeltaLocationSize);
 						EtaStep += Step;
@@ -591,31 +605,32 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 					const FSolverInternal& SolverInternal = SolverInternals[Effector.EffectorBoneIndex];
 					FTransform InitWorldTransform = SolverInternal.InitComponentTransform * CachedComponentTransform; //TODO:なぜこの計算でワールド行列が手に入るのか？
 
-#if 0
-					// Transform更新
-					SolveSolver(0, FTransform::Identity,
-						[&](int32 BoneIndex, FVector& SavedOffsetLocation, FVector& CurrentOffsetLocation)
+					SolveSolver(
+						0,
+						FTransform::Identity,
+						[&](int32 BoneIndex, FVector& SavedLocationOffset, FVector& CurrentOffsetedLocation)
 						{
+							// Translationに対してはなにもしない
 						},
-						[&](int32 BoneIndex, FRotator& SavedOffsetRotation, FRotator& CurrentOffsetRotation)
+						[&](int32 BoneIndex, FRotator& SavedRotationOffset, FRotator& CurrentOffsetedRotation)
 						{
 							if (BoneIndex != Effector.EffectorBoneIndex)
 							{
 								return;
 							}
 
+							// Translationと違ってRotationの方はステップを踏んで少しずつ近づけることはせず一気に目標の向きに修正する
 							FTransform EffectorWorldTransform = FTransform(InitWorldTransform.Rotator());
-							FTransform EffectorComponentTransform = EffectorWorldTransform * CachedComponentTransform.Inverse();
-							FTransform EffectorLocalTransform = EffectorComponentTransform * SolverInternals[SolverInternal.ParentBoneIndex].ComponentTransform.Inverse();
+							FTransform EffectorComponentTransform = EffectorWorldTransform * CachedComponentTransform.Inverse(); // TODO:ん？これあってる？
+							FTransform EffectorLocalTransform = EffectorComponentTransform * SolverInternals[SolverInternal.ParentBoneIndex].ComponentTransform.Inverse(); // TODO:これも。逆行列を右からかける意味ってなんだっけ？
 
 							FRotator EffectorLocalRotation = EffectorLocalTransform.Rotator();
-							FRotator DeltaLocalRotation = EffectorLocalRotation + Effector.Rotation - CurrentOffsetRotation;
+							FRotator DeltaLocalRotation = EffectorLocalRotation - CurrentOffsetedRotation;
 
-							SavedOffsetRotation += DeltaLocalRotation;
-							CurrentOffsetRotation += DeltaLocalRotation;
+							SavedRotationOffset += DeltaLocalRotation;
+							CurrentOffsetedRotation += DeltaLocalRotation;
 						}
 					);
-#endif
 
 					DisplacementCount = BoneAxisCount;
 				}
@@ -625,32 +640,33 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 					const FSolverInternal& SolverInternal = SolverInternals[Effector.EffectorBoneIndex];
 					FTransform InitWorldTransform = SolverInternal.InitComponentTransform * CachedComponentTransform; //TODO:なぜこの計算でワールド行列が手に入るのか？
 
-#if 0
-					// FollowOriginalRotationにあたる処理
-					// Transform更新
-					SolveSolver(0, FTransform::Identity,
-						[&](int32 BoneIndex, FVector& SavedOffsetLocation, FVector& CurrentOffsetLocation)
+					SolveSolver(
+						0,
+						FTransform::Identity,
+						[&](int32 BoneIndex, FVector& SavedLocationOffset, FVector& CurrentOffsetedLocation)
 						{
+							// Translationに対してはなにもしない
 						},
-						[&](int32 BoneIndex, FRotator& SavedOffsetRotation, FRotator& CurrentOffsetRotation)
+						[&](int32 BoneIndex, FRotator& SavedRotationOffset, FRotator& CurrentOffsetedRotation)
 						{
 							if (BoneIndex != Effector.EffectorBoneIndex)
 							{
 								return;
 							}
 
+							// Translationと違ってRotationの方はステップを踏んで少しずつ近づけることはせず一気に目標の向きに修正する
 							FTransform EffectorWorldTransform = FTransform(InitWorldTransform.Rotator());
-							FTransform EffectorComponentTransform = EffectorWorldTransform * CachedComponentTransform.Inverse();
-							FTransform EffectorLocalTransform = EffectorComponentTransform * SolverInternals[SolverInternal.ParentBoneIndex].ComponentTransform.Inverse();
+							FTransform EffectorComponentTransform = EffectorWorldTransform * CachedComponentTransform.Inverse(); // TODO:ん？これあってる？
+							FTransform EffectorLocalTransform = EffectorComponentTransform * SolverInternals[SolverInternal.ParentBoneIndex].ComponentTransform.Inverse(); // TODO:これも。逆行列を右からかける意味ってなんだっけ？
 
 							FRotator EffectorLocalRotation = EffectorLocalTransform.Rotator();
-							FRotator DeltaLocalRotation = EffectorLocalRotation + Effector.Rotation - CurrentOffsetRotation;
+							FRotator DeltaLocalRotation = EffectorLocalRotation - CurrentOffsetedRotation;
 
-							SavedOffsetRotation += DeltaLocalRotation;
-							CurrentOffsetRotation += DeltaLocalRotation;
+							SavedRotationOffset += DeltaLocalRotation;
+							CurrentOffsetedRotation += DeltaLocalRotation;
 						}
 					);
-#endif
+
 					FVector EndSolverLocation = GetWorldSpaceBoneLocation(Effector.EffectorBoneIndex);
 					FVector DeltaLocation = InitWorldTransform.GetLocation() + CachedComponentTransform.TransformVector(Effector.Location) - EndSolverLocation; // TODO:なぜこれが目標位置への差分になるのか？
 					float DeltaLocationSize = DeltaLocation.Size();
@@ -1144,112 +1160,116 @@ void FAnimNode_FullbodyIKPractice::SolveSolver(
 
 	if (SolverInternal.bTranslation)
 	{
-		// 前回、SolveSolverの計算結果として保持したLocationOffset(Translateのオフセット)。初期値は0である
-		FVector SavedOffsetLocation = IAnimInstanceInterface_FullbodyIK::Execute_GetBoneLocationOffset(CachedAnimInstanceObject, BoneIndex);
-		// Evaluateの先頭で取得したローカルのTlanslate
-		FVector CurrentOffsetLocation = SolverInternal.LocalTransform.GetLocation();
+		// ほげたつさんのソースでは変数名がわかりにくかったので修正した
 
-		LocationOffsetProcess(BoneIndex, SavedOffsetLocation, CurrentOffsetLocation);
+		// 前回、SolveSolverの計算結果として保持したLocationOffset(Translateのオフセット)。初期値は0である
+		FVector SavedLocationOffset = IAnimInstanceInterface_FullbodyIK::Execute_GetBoneLocationOffset(CachedAnimInstanceObject, BoneIndex);
+		// Evaluateの先頭で取得したローカルのTlanslate
+		FVector CurrentOffsetedLocation = SolverInternal.LocalTransform.GetLocation();
+
+		LocationOffsetProcess(BoneIndex, SavedLocationOffset, CurrentOffsetedLocation);
 
 		// IK計算後に、関節の可動域のMax/MinによるClamp処理。超過した差分をマイナスする。
 		if (SolverInternal.bLimited)
 		{
-			if (CurrentOffsetLocation.X < SolverInternal.X.LimitMin)
+			if (CurrentOffsetedLocation.X < SolverInternal.X.LimitMin)
 			{
-				float Offset = SolverInternal.X.LimitMin - CurrentOffsetLocation.X;
-				CurrentOffsetLocation.X += Offset;
-				SavedOffsetLocation.X += Offset;
+				float Offset = SolverInternal.X.LimitMin - CurrentOffsetedLocation.X;
+				CurrentOffsetedLocation.X += Offset;
+				SavedLocationOffset.X += Offset;
 			}
-			else if (CurrentOffsetLocation.X > SolverInternal.X.LimitMax)
+			else if (CurrentOffsetedLocation.X > SolverInternal.X.LimitMax)
 			{
-				float Offset = SolverInternal.X.LimitMax - CurrentOffsetLocation.X;
-				CurrentOffsetLocation.X += Offset;
-				SavedOffsetLocation.X += Offset;
-			}
-
-			if (CurrentOffsetLocation.Y < SolverInternal.Y.LimitMin)
-			{
-				float Offset = SolverInternal.Y.LimitMin - CurrentOffsetLocation.Y;
-				CurrentOffsetLocation.Y += Offset;
-				SavedOffsetLocation.Y += Offset;
-			}
-			else if (CurrentOffsetLocation.Y > SolverInternal.Y.LimitMax)
-			{
-				float Offset = SolverInternal.Y.LimitMax - CurrentOffsetLocation.Y;
-				CurrentOffsetLocation.Y += Offset;
-				SavedOffsetLocation.Y += Offset;
+				float Offset = SolverInternal.X.LimitMax - CurrentOffsetedLocation.X;
+				CurrentOffsetedLocation.X += Offset;
+				SavedLocationOffset.X += Offset;
 			}
 
-			if (CurrentOffsetLocation.Z < SolverInternal.Z.LimitMin)
+			if (CurrentOffsetedLocation.Y < SolverInternal.Y.LimitMin)
 			{
-				float Offset = SolverInternal.Z.LimitMin - CurrentOffsetLocation.Z;
-				CurrentOffsetLocation.Z += Offset;
-				SavedOffsetLocation.Z += Offset;
+				float Offset = SolverInternal.Y.LimitMin - CurrentOffsetedLocation.Y;
+				CurrentOffsetedLocation.Y += Offset;
+				SavedLocationOffset.Y += Offset;
 			}
-			else if (CurrentOffsetLocation.Z > SolverInternal.Z.LimitMax)
+			else if (CurrentOffsetedLocation.Y > SolverInternal.Y.LimitMax)
 			{
-				float Offset = SolverInternal.Z.LimitMax - CurrentOffsetLocation.Z;
-				CurrentOffsetLocation.Z += Offset;
-				SavedOffsetLocation.Z += Offset;
+				float Offset = SolverInternal.Y.LimitMax - CurrentOffsetedLocation.Y;
+				CurrentOffsetedLocation.Y += Offset;
+				SavedLocationOffset.Y += Offset;
+			}
+
+			if (CurrentOffsetedLocation.Z < SolverInternal.Z.LimitMin)
+			{
+				float Offset = SolverInternal.Z.LimitMin - CurrentOffsetedLocation.Z;
+				CurrentOffsetedLocation.Z += Offset;
+				SavedLocationOffset.Z += Offset;
+			}
+			else if (CurrentOffsetedLocation.Z > SolverInternal.Z.LimitMax)
+			{
+				float Offset = SolverInternal.Z.LimitMax - CurrentOffsetedLocation.Z;
+				CurrentOffsetedLocation.Z += Offset;
+				SavedLocationOffset.Z += Offset;
 			}
 		}
 
-		IAnimInstanceInterface_FullbodyIK::Execute_SetBoneLocationOffset(CachedAnimInstanceObject, BoneIndex, SavedOffsetLocation);
-		SolverInternal.LocalTransform.SetLocation(CurrentOffsetLocation);
+		IAnimInstanceInterface_FullbodyIK::Execute_SetBoneLocationOffset(CachedAnimInstanceObject, BoneIndex, SavedLocationOffset);
+		SolverInternal.LocalTransform.SetLocation(CurrentOffsetedLocation);
 	}
 	else
 	{
-		// 前回、SolveSolverの計算結果として保持したRotationOffset。初期値は0である
-		FRotator SavedOffsetRotation = IAnimInstanceInterface_FullbodyIK::Execute_GetBoneRotationOffset(CachedAnimInstanceObject, BoneIndex);
-		// Evaluateの先頭で取得したローカルのRotate
-		FRotator CurrentOffsetRotation = SolverInternal.LocalTransform.Rotator();
+		// ほげたつさんのソースでは変数名がわかりにくかったので修正した
 
-		RotationOffsetProcess(BoneIndex, SavedOffsetRotation, CurrentOffsetRotation);
+		// 前回、SolveSolverの計算結果として保持したRotationOffset。初期値は0である
+		FRotator SavedRotationOffset = IAnimInstanceInterface_FullbodyIK::Execute_GetBoneRotationOffset(CachedAnimInstanceObject, BoneIndex);
+		// Evaluateの先頭で取得したローカルのRotate
+		FRotator CurrentOffsetedRotation = SolverInternal.LocalTransform.Rotator();
+
+		RotationOffsetProcess(BoneIndex, SavedRotationOffset, CurrentOffsetedRotation);
 
 		if (SolverInternal.bLimited)
 		{
-			if (CurrentOffsetRotation.Roll < SolverInternal.X.LimitMin)
+			if (CurrentOffsetedRotation.Roll < SolverInternal.X.LimitMin)
 			{
-				float Offset = SolverInternal.X.LimitMin - CurrentOffsetRotation.Roll;
-				CurrentOffsetRotation.Roll += Offset;
-				SavedOffsetRotation.Roll += Offset;
+				float Offset = SolverInternal.X.LimitMin - CurrentOffsetedRotation.Roll;
+				CurrentOffsetedRotation.Roll += Offset;
+				SavedRotationOffset.Roll += Offset;
 			}
-			else if (CurrentOffsetRotation.Roll > SolverInternal.X.LimitMax)
+			else if (CurrentOffsetedRotation.Roll > SolverInternal.X.LimitMax)
 			{
-				float Offset = SolverInternal.X.LimitMax - CurrentOffsetRotation.Roll;
-				CurrentOffsetRotation.Roll += Offset;
-				SavedOffsetRotation.Roll += Offset;
-			}
-
-			if (CurrentOffsetRotation.Pitch < SolverInternal.Y.LimitMin)
-			{
-				float Offset = SolverInternal.Y.LimitMin - CurrentOffsetRotation.Pitch;
-				CurrentOffsetRotation.Pitch += Offset;
-				SavedOffsetRotation.Pitch += Offset;
-			}
-			else if (CurrentOffsetRotation.Pitch > SolverInternal.Y.LimitMax)
-			{
-				float Offset = SolverInternal.Y.LimitMax - CurrentOffsetRotation.Pitch;
-				CurrentOffsetRotation.Pitch += Offset;
-				SavedOffsetRotation.Pitch += Offset;
+				float Offset = SolverInternal.X.LimitMax - CurrentOffsetedRotation.Roll;
+				CurrentOffsetedRotation.Roll += Offset;
+				SavedRotationOffset.Roll += Offset;
 			}
 
-			if (CurrentOffsetRotation.Yaw < SolverInternal.Z.LimitMin)
+			if (CurrentOffsetedRotation.Pitch < SolverInternal.Y.LimitMin)
 			{
-				float Offset = SolverInternal.Z.LimitMin - CurrentOffsetRotation.Yaw;
-				CurrentOffsetRotation.Yaw += Offset;
-				SavedOffsetRotation.Yaw += Offset;
+				float Offset = SolverInternal.Y.LimitMin - CurrentOffsetedRotation.Pitch;
+				CurrentOffsetedRotation.Pitch += Offset;
+				SavedRotationOffset.Pitch += Offset;
 			}
-			else if (CurrentOffsetRotation.Yaw > SolverInternal.Z.LimitMax)
+			else if (CurrentOffsetedRotation.Pitch > SolverInternal.Y.LimitMax)
 			{
-				float Offset = SolverInternal.Z.LimitMax - CurrentOffsetRotation.Yaw;
-				CurrentOffsetRotation.Yaw += Offset;
-				SavedOffsetRotation.Yaw += Offset;
+				float Offset = SolverInternal.Y.LimitMax - CurrentOffsetedRotation.Pitch;
+				CurrentOffsetedRotation.Pitch += Offset;
+				SavedRotationOffset.Pitch += Offset;
+			}
+
+			if (CurrentOffsetedRotation.Yaw < SolverInternal.Z.LimitMin)
+			{
+				float Offset = SolverInternal.Z.LimitMin - CurrentOffsetedRotation.Yaw;
+				CurrentOffsetedRotation.Yaw += Offset;
+				SavedRotationOffset.Yaw += Offset;
+			}
+			else if (CurrentOffsetedRotation.Yaw > SolverInternal.Z.LimitMax)
+			{
+				float Offset = SolverInternal.Z.LimitMax - CurrentOffsetedRotation.Yaw;
+				CurrentOffsetedRotation.Yaw += Offset;
+				SavedRotationOffset.Yaw += Offset;
 			}
 		}
 
-		IAnimInstanceInterface_FullbodyIK::Execute_SetBoneRotationOffset(CachedAnimInstanceObject, BoneIndex, SavedOffsetRotation);
-		SolverInternal.LocalTransform.SetRotation(FQuat(CurrentOffsetRotation));
+		IAnimInstanceInterface_FullbodyIK::Execute_SetBoneRotationOffset(CachedAnimInstanceObject, BoneIndex, SavedRotationOffset);
+		SolverInternal.LocalTransform.SetRotation(FQuat(CurrentOffsetedRotation));
 	}
 
 	// 最終的に計算したかったもの
