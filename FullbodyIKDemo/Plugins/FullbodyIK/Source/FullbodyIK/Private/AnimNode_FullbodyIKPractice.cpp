@@ -418,6 +418,8 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 		const FCompactPoseBoneIndex& CompactPoseBoneIndex = FCompactPoseBoneIndex(BoneIndex);
 		FSolverInternal& SolverInternal = SolverInternals[BoneIndex];
 		// Context.Poseでバインドポーズをとってきて初期化
+		// TODO:バインドポーズをとってきて、それに対して保存していた前フレームでのオフセットを加算するという作りでもいいけど、
+		// 前フレームの結果を踏まえた今のローカル座標やコンポーネント座標を使ってもよかったと思うがなぜそうしなかったのだろう？
 		SolverInternal.LocalTransform = Context.Pose.GetLocalSpaceTransform(CompactPoseBoneIndex);
 		SolverInternal.ComponentTransform = Context.Pose.GetComponentSpaceTransform(CompactPoseBoneIndex);
 		SolverInternal.InitLocalTransform = SolverInternal.LocalTransform;
@@ -848,12 +850,7 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 					+ EffectorStep[3] * Jwp.Ref(3, i);
 			}
 
-			// TODO:冗長変数イータを計算に入れたRt2の計算は枝葉なので後回し
-			// TODO:とりあえずRt2が必要なのでRt1と同じにしておく
-			Rt2.Reset();
-			Rt2 = Rt1;
-#if 0
-			// TODO;
+			// etaをどのように決定するかは向井さんの資料には書いてなかった
 			// 冗長変数 Eta
 			// auto Eta = FBuffer(BoneAxisCount);
 			Eta.Reset();
@@ -861,24 +858,24 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 			{
 				for (int32 i = 0; i < BoneCount; ++i)
 				{
-					SCOPE_CYCLE_COUNTER(STAT_FullbodyIK_CulcEta);
-
 					int32 BoneIndex = BoneIndices[i];
-					auto& SolverInternal = SolverInternals[BoneIndex];
+					FSolverInternal& SolverInternal = SolverInternals[BoneIndex];
 
 					if (SolverInternal.bTranslation)
 					{
 						FVector CurrentLocation = GetLocalSpaceBoneLocation(BoneIndex);
 						FVector InputLocation = SolverInternal.InitLocalTransform.GetLocation();
 
-						auto CalcEta = [&](int32 Axis, float CurrentPosition, float InputPosition, const FFullbodyIKSolverAxis& SolverAxis)
+						const TFunction<void(int32, float, float, const FFullbodyIKSolverAxis&)>& CalcEta =
+						[&](int32 Axis, float CurrentPosition, float InputPosition, const FFullbodyIKSolverAxis& SolverAxis)
 						{
+							//TODO:これは一体どういう計算なんだ？ 
 							CurrentPosition += Rt1.Ref(i * AXIS_COUNT + Axis);
 							float DeltaPosition = CurrentPosition - InputPosition;
 							if (!FMath::IsNearlyZero(DeltaPosition))
 							{
-								Eta.Ref(i * AXIS_COUNT + Axis) = GetMappedRangeEaseInClamped(
-									0, 90,
+								Eta.Ref(i * AXIS_COUNT + Axis) = GetMappedRangeEaseInClampedPractice(
+									0, 90, // TODO:90ってなんだ？
 									0, Setting->EtaSize * SolverAxis.EtaBias * EtaStep,
 									1.f, FMath::Abs(DeltaPosition)
 								) * (DeltaPosition > 0 ? -1 : 1);
@@ -894,14 +891,16 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 						FRotator CurrentRotation = GetLocalSpaceBoneRotation(BoneIndex).Rotator();
 						FRotator InputRotation = SolverInternal.InitLocalTransform.Rotator();
 
-						auto CalcEta = [&](int32 Axis, float CurrentAngle, float InputAngle, const FFullbodyIKSolverAxis& SolverAxis)
+						const TFunction<void(int32, float, float, const FFullbodyIKSolverAxis&)>& CalcEta =
+						[&](int32 Axis, float CurrentAngle, float InputAngle, const FFullbodyIKSolverAxis& SolverAxis)
 						{
+							//TODO:これは一体どういう計算なんだ？ 
 							CurrentAngle += FMath::RadiansToDegrees(Rt1.Ref(i * AXIS_COUNT + Axis));
 							float DeltaAngle = FRotator::NormalizeAxis(CurrentAngle - InputAngle);
 							if (!FMath::IsNearlyZero(DeltaAngle))
 							{
-								Eta.Ref(i * AXIS_COUNT + Axis) = GetMappedRangeEaseInClamped(
-									0, 90,
+								Eta.Ref(i * AXIS_COUNT + Axis) = GetMappedRangeEaseInClampedPractice(
+									0, 90, // TODO:90ってなんだ？
 									0, Setting->EtaSize * SolverAxis.EtaBias * EtaStep,
 									1.f, FMath::Abs(DeltaAngle)
 								) * (DeltaAngle > 0 ? -1 : 1);
@@ -929,9 +928,9 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 			// Eta * J * J^+
 			// auto EtaJJp = FBuffer(BoneAxisCount);
 			EtaJJp.Reset();
-			for (int32 i = 0; i < BoneAxisCount; ++i)
+			for (int32 i = 0; i < AXIS_COUNT; ++i)
 			{
-				for (int32 j = 0; j < AXIS_COUNT; ++j)
+				for (int32 j = 0; j < BoneAxisCount; ++j)
 				{
 					EtaJJp.Ref(i) += EtaJ.Ref(j) * Jp.Ref(j, i);
 				}
@@ -940,43 +939,48 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 			// 冗長項 Eta - Eta * J * J^+
 			// auto Rt2 = FBuffer(BoneAxisCount);
 			Rt2.Reset();
-			for (int32 i = 0; i < BoneAxisCount; ++i)
+			for (int32 i = 0; i < AXIS_COUNT; ++i)
 			{
 				Rt2.Ref(i) = Eta.Ref(i) - EtaJJp.Ref(i);
 			}
-#endif
 
-#if 0
-			// Transform更新
-			SolveSolver(0, FTransform::Identity,
-				[&](int32 BoneIndex, FVector& SavedOffsetLocation, FVector& CurrentOffsetLocation)
+			// IK計算の結果をSolverInternals[BoneIndex].LocalTransform/ComponentTransformに入れる
+			SolveSolver(
+				0,
+				FTransform::Identity,
+				[&](int32 BoneIndex, FVector& SavedLocationOffset, FVector& CurrentOffsetedLocation)
 				{
+					// IKってジョイントの角度を変えると思ってたけど、やっぱりここではジョイントのTranslateもいじるのね
 					int32 BoneIndicesIndex = SolverInternals[BoneIndex].BoneIndicesIndex;
 
 					FVector DeltaLocation = FVector(
-						Rt1.Ref(BoneIndicesIndex * AXIS_COUNT + 0) + Rt2.Ref(BoneIndicesIndex * AXIS_COUNT + 0),	// X
-						Rt1.Ref(BoneIndicesIndex * AXIS_COUNT + 1) + Rt2.Ref(BoneIndicesIndex * AXIS_COUNT + 1),	// Y
-						Rt1.Ref(BoneIndicesIndex * AXIS_COUNT + 2) + Rt2.Ref(BoneIndicesIndex * AXIS_COUNT + 2)		// Z
+						Rt1.Ref(BoneIndicesIndex * AXIS_COUNT + 0) + Rt2.Ref(BoneIndicesIndex * AXIS_COUNT + 0), // X
+						Rt1.Ref(BoneIndicesIndex * AXIS_COUNT + 1) + Rt2.Ref(BoneIndicesIndex * AXIS_COUNT + 1), // Y
+						Rt1.Ref(BoneIndicesIndex * AXIS_COUNT + 2) + Rt2.Ref(BoneIndicesIndex * AXIS_COUNT + 2) // Z
 					);
 
-					SavedOffsetLocation += DeltaLocation;
-					CurrentOffsetLocation += DeltaLocation;
+					SavedLocationOffset += DeltaLocation;
+					CurrentOffsetedLocation += DeltaLocation;
 				},
-				[&](int32 BoneIndex, FRotator& SavedOffsetRotation, FRotator& CurrentOffsetRotation)
+				[&](int32 BoneIndex, FRotator& SavedRotationOffset, FRotator& CurrentOffsetedRotation)
 				{
 					int32 BoneIndicesIndex = SolverInternals[BoneIndex].BoneIndicesIndex;
 
 					FRotator DeltaRotation = FRotator(
-						FMath::RadiansToDegrees(Rt1.Ref(BoneIndicesIndex * AXIS_COUNT + 1) + Rt2.Ref(BoneIndicesIndex * AXIS_COUNT + 1)),	// Pitch
-						FMath::RadiansToDegrees(Rt1.Ref(BoneIndicesIndex * AXIS_COUNT + 2) + Rt2.Ref(BoneIndicesIndex * AXIS_COUNT + 2)),	// Yaw
-						FMath::RadiansToDegrees(Rt1.Ref(BoneIndicesIndex * AXIS_COUNT + 0) + Rt2.Ref(BoneIndicesIndex * AXIS_COUNT + 0))	// Roll
+						FMath::RadiansToDegrees(Rt1.Ref(BoneIndicesIndex * AXIS_COUNT + 0) + Rt2.Ref(BoneIndicesIndex * AXIS_COUNT + 0)), // X
+						FMath::RadiansToDegrees(Rt1.Ref(BoneIndicesIndex * AXIS_COUNT + 1) + Rt2.Ref(BoneIndicesIndex * AXIS_COUNT + 1)), // Y
+						FMath::RadiansToDegrees(Rt1.Ref(BoneIndicesIndex * AXIS_COUNT + 2) + Rt2.Ref(BoneIndicesIndex * AXIS_COUNT + 2)) // Z
 					);
 
-					SavedOffsetRotation += DeltaRotation;
-					CurrentOffsetRotation += DeltaRotation;
+					SavedRotationOffset += DeltaRotation;
+					CurrentOffsetedRotation += DeltaRotation;
 				}
 			);
-#endif
+
+#if 0
+			// 重心の更新
+			UpdateCenterOfMass();
+#endif 
 
 			++EffectiveCount;
 
@@ -987,6 +991,12 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 		}
 
 		++StepLoopCount;
+
+		// ほげたつさんのコードでは入っているがEffectiveCountはここでは増えないので必要ない
+		//if (EffectiveCount >= Setting->EffectiveCountMax)
+		//{
+		//	break;
+		//}
 	}
 
 	// 計算結果をノードの出力に反映。フルボディIKに関わるすべてのボーン（BoneIndicesに含まれるもの）に反映させる
