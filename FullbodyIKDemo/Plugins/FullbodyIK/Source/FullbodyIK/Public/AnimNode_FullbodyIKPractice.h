@@ -79,6 +79,9 @@ struct FULLBODYIK_API FAnimNode_FullbodyIKPractice : public FAnimNode_SkeletalCo
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category=IK)
 	int32 EffectorCountMax;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category=IK)
+	FVector CenterOfMass;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=EndEffector, meta=(PinShownByDefault))
 	FAnimNode_FullbodyIkEffectorsPractice Effectors;
 
@@ -150,6 +153,16 @@ private:
 	{
 	public:
 		FSolverInternal()
+			: BoneIndex(INDEX_NONE)
+			, ParentBoneIndex(INDEX_NONE)
+			, BoneIndicesIndex(INDEX_NONE)
+			, LocalTransform(FTransform::Identity)
+			, ComponentTransform(FTransform::Identity)
+			, InitLocalTransform(FTransform::Identity)
+			, InitComponentTransform(FTransform::Identity)
+			, bTranslation(false)
+			, bLimited(false)
+			, Mass(1.0f)
 		{
 		}
 
@@ -162,6 +175,7 @@ private:
 		FTransform InitComponentTransform;
 		bool bTranslation;
 		bool bLimited;
+		float Mass;
 		FFullbodyIKSolverAxis X;
 		FFullbodyIKSolverAxis Y;
 		FFullbodyIKSolverAxis Z;
@@ -204,6 +218,8 @@ private:
 		const FTransform& ParentComponentTransform,
 		const TFunction<void(int32, FVector&, FVector&)>& LocationOffsetProcess,
 		const TFunction<void(int32, FRotator&, FRotator&)>& RotationOffsetProcess);
+
+	void UpdateCenterOfMass();
 
 	static const int32 AXIS_COUNT = 3;
 

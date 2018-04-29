@@ -240,6 +240,8 @@ void FAnimNode_FullbodyIKPractice::Initialize_AnyThread(const FAnimationInitiali
 			SolverInternal.ParentBoneIndex = ParentBoneIndex;
 			SolverInternal.BoneIndicesIndex = -1;
 			SolverInternal.bTranslation = Solver.bTranslation;
+			SolverInternal.bLimited = Solver.bLimited;
+			SolverInternal.Mass = Solver.Mass;
 			SolverInternal.X = Solver.X;
 			SolverInternal.Y = Solver.Y;
 			SolverInternal.Z = Solver.Z;
@@ -446,10 +448,8 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 		}
 	);
 
-#if 0
 	// 重心の更新
 	UpdateCenterOfMass();
-#endif
 
 	// 反復計算をするので、ループの最大数の定義は必要。それがStepLoopCountとStepLoopCountMax
 	int32 StepLoopCount = 0;
@@ -977,10 +977,8 @@ void FAnimNode_FullbodyIKPractice::EvaluateSkeletalControl_AnyThread(FComponentS
 				}
 			);
 
-#if 0
 			// 重心の更新
 			UpdateCenterOfMass();
-#endif 
 
 			++EffectiveCount;
 
@@ -1293,4 +1291,28 @@ void FAnimNode_FullbodyIKPractice::SolveSolver(
 			SolveSolver(ChildBoneIndex, SolverInternal.ComponentTransform, LocationOffsetProcess, RotationOffsetProcess);
 		}
 	}
+}
+
+void FAnimNode_FullbodyIKPractice::UpdateCenterOfMass()
+{
+	CenterOfMass = FVector::ZeroVector;
+	float MassSum = 0.0f;
+
+	for (int32 BoneIndex : BoneIndices)
+	{
+		const FSolverInternal& SolverInternal = SolverInternals[BoneIndex];
+		int32 ParentBoneIndex = SolverInternal.ParentBoneIndex;
+		if (ParentBoneIndex == INDEX_NONE)
+		{
+			continue;
+		}
+
+		const FSolverInternal& ParentSolverInternal = SolverInternals[ParentBoneIndex];
+
+		// 重さは、あるジョイントとその親のジョイントの間の中間に働くと考えるので中間点を用いる
+		CenterOfMass += (SolverInternal.ComponentTransform.GetLocation() + ParentSolverInternal.ComponentTransform.GetLocation()) * 0.5f * SolverInternal.Mass;
+		MassSum += SolverInternal.Mass;
+	}
+
+	CenterOfMass /= MassSum;
 }
